@@ -126,26 +126,36 @@ class RingController(private val context: Context) : RingGattClient.Listener {
      * Send the ring's LOCK operation and gate input on the host side, as the SDK
      * requires: while locked, recording starts and audio are ignored.
      */
-    fun lock() = handler.post {
-        gatt?.send(OperationCommand.LOCK)
-        finishRecording()
-        _state.update { it.copy(locked = true) }
-        log("Ring gesperrt")
+    fun lock() {
+        handler.post {
+            gatt?.send(OperationCommand.LOCK)
+            finishRecording()
+            _state.update { it.copy(locked = true) }
+            log("Ring gesperrt")
+        }
     }
 
     /** Unlocking is a purely host-side state change (there is no UNLOCK command). */
-    fun unlock() = handler.post {
-        _state.update { it.copy(locked = false) }
-        log("Ring entsperrt")
+    fun unlock() {
+        handler.post {
+            _state.update { it.copy(locked = false) }
+            log("Ring entsperrt")
+        }
     }
 
-    fun requestBattery() = handler.post { gatt?.send(OperationCommand.BATTERY_STATUS) }
+    fun requestBattery() {
+        handler.post { gatt?.send(OperationCommand.BATTERY_STATUS) }
+    }
 
-    fun refreshRecordings() = handler.post { _state.update { it.copy(recordings = store.list()) } }
+    fun refreshRecordings() {
+        handler.post { _state.update { it.copy(recordings = store.list()) } }
+    }
 
-    fun delete(recording: Recording) = handler.post {
-        store.delete(recording)
-        _state.update { it.copy(recordings = store.list()) }
+    fun delete(recording: Recording) {
+        handler.post {
+            store.delete(recording)
+            _state.update { it.copy(recordings = store.list()) }
+        }
     }
 
     // ---- GATT listener (ring thread) ----------------------------------------------------------

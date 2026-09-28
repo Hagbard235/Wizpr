@@ -151,20 +151,22 @@ private fun RingTab(
         }
 
         item {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (scanning) {
-                    OutlinedButton(onClick = actions.onStopScan) { Text("Suche stoppen") }
-                    CircularProgressIndicator(Modifier.size(24.dp))
-                } else {
-                    Button(onClick = actions.onScan) { Text("Ringe suchen") }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (scanning) {
+                        OutlinedButton(onClick = actions.onStopScan) { Text("Suche stoppen") }
+                        CircularProgressIndicator(Modifier.size(24.dp))
+                    } else {
+                        Button(onClick = actions.onScan) { Text("Ringe suchen") }
+                    }
                 }
-            }
-            scanError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            if (!scanning && found.isEmpty()) {
-                Text(
-                    "Ring einschalten und in die Nähe halten, dann suchen. Tippe auf einen Treffer, um zu verbinden.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                scanError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (!scanning && found.isEmpty()) {
+                    Text(
+                        "Ring einschalten und in die Nähe halten, dann suchen. Tippe auf einen Treffer, um zu verbinden.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
 
