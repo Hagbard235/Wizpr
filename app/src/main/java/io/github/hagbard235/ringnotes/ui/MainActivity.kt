@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
                 val aiStatus by transcriptions.aiStatus.collectAsStateWithLifecycle()
                 val aiConfig by aiSettings.config.collectAsStateWithLifecycle()
                 val symconViews by symconJobs.views.collectAsStateWithLifecycle()
+                val lastTestEntry by transcriptions.lastTestEntry.collectAsStateWithLifecycle()
 
                 RingScreen(
                     state = state,
@@ -96,6 +97,7 @@ class MainActivity : ComponentActivity() {
                     aiStatus = aiStatus,
                     aiConfig = aiConfig,
                     symconViews = symconViews,
+                    lastTestEntry = lastTestEntry,
                     actions = RingScreenActions(
                         onScan = { withBluetooth { scanner.start() } },
                         onStopScan = scanner::stop,
@@ -114,6 +116,7 @@ class MainActivity : ComponentActivity() {
                         onSymconAnswer = { rec: Recording, optionId: String?, text: String ->
                             symconJobs.answer(rec.file.path, optionId, text)
                         },
+                        onSubmitText = { text: String -> transcriptions.submitText(text) },
                         onDelete = { rec: Recording ->
                             if (playing == rec.file) player.stop()
                             controller.delete(rec)

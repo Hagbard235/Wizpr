@@ -1,6 +1,7 @@
 package io.github.hagbard235.ringnotes.recording
 
 import android.content.Context
+import io.github.hagbard235.ringnotes.core.StreamingWavWriter
 import io.github.hagbard235.ringnotes.core.WizprBle
 import java.io.File
 import java.text.SimpleDateFormat
@@ -41,6 +42,21 @@ class RecordingStore(context: Context) {
             .sortedByDescending { it.createdAt }
 
     fun find(wav: File): Recording? = if (wav.exists()) load(wav) else null
+
+    /**
+     * A typed test input standing in for speech recognition: an empty WAV (header
+     * only) plus the text as its transcript, so it flows through the same pipeline
+     * and UI as a real recording.
+     */
+    fun createTextEntry(text: String, now: Long = System.currentTimeMillis()): Recording {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(now))
+        var file = File(directory, "test-$stamp.wav")
+        var n = 2
+        while (file.exists()) file = File(directory, "test-$stamp-${n++}.wav")
+        StreamingWavWriter(file).close()
+        saveTranscript(file, text)
+        return load(file)
+    }
 
     fun delete(recording: Recording) {
         recording.file.delete()

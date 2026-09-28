@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,6 +79,8 @@ class RingScreenActions(
     val onSymconRefresh: (Recording) -> Unit,
     /** optionId is null for a free-text answer. */
     val onSymconAnswer: (Recording, String?, String) -> Unit,
+    /** Debug: send typed text instead of a recognized recording. */
+    val onSubmitText: (String) -> Unit,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,6 +96,7 @@ fun RingScreen(
     aiStatus: Map<String, TranscriptionStatus>,
     aiConfig: AiConfig,
     symconViews: Map<String, SymconView>,
+    lastTestEntry: String?,
     actions: RingScreenActions,
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
@@ -110,7 +114,15 @@ fun RingScreen(
                     state.recordings, playing, transcriptionStatus, transcriptionSupported, aiStatus, aiConfig,
                     symconViews, actions,
                 )
-                2 -> AiSettingsTab(aiConfig, actions.onUpdateAi)
+                2 -> AiSettingsTab(aiConfig, actions.onUpdateAi) {
+                    TestInputPanel(
+                        config = aiConfig,
+                        lastEntry = state.recordings.firstOrNull { it.file.path == lastTestEntry },
+                        aiStatus = aiStatus,
+                        symconViews = symconViews,
+                        actions = actions,
+                    )
+                }
                 else -> LogTab(state)
             }
         }
@@ -305,6 +317,62 @@ private fun Transcript(
                 )
             }
         supported -> TextButton(onClick = onTranscribe, modifier = Modifier.padding(start = 4.dp)) { Text("Transkribieren") }
+    }
+}
+
+/**
+ * Debug input standing in for speech recognition: the text runs through the same
+ * forwarding as a transcript, and the latest result is shown right below.
+ */
+@Composable
+private fun TestInputPanel(
+    config: AiConfig,
+    lastEntry: Recording?,
+    aiStatus: Map<String, TranscriptionStatus>,
+    symconViews: Map<String, SymconView>,
+    actions: RingScreenActions,
+) {
+    var text by rememberSaveable { mutableStateOf("") }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Testeingabe (statt Spracherkennung)", style = MaterialTheme.typography.titleSmall)
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text("z. B. Schalte den Sternenhimmel für zwei Minuten ein") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    enabled = config.isReady && text.isNotBlank(),
+                    onClick = {
+                        actions.onSubmitText(text)
+                        text = ""
+                    },
+                ) { Text("Senden") }
+                if (!config.isReady) {
+                    Text("Ziel erst unten einrichten", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Text(
+                "Wird wie ein Transkript behandelt und beantwortet auch offene Rückfragen. " +
+                    "Erscheint als „test-…“ unter Aufnahmen.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+    if (lastEntry != null) {
+        Text("Letzte Testeingabe: „${lastEntry.transcript.orEmpty()}“", style = MaterialTheme.typography.bodySmall)
+        val symcon = symconViews[lastEntry.file.path]
+        if (symcon != null) {
+            SymconCard(
+                view = symcon,
+                onRefresh = { actions.onSymconRefresh(lastEntry) },
+                onAnswer = { optionId, answer -> actions.onSymconAnswer(lastEntry, optionId, answer) },
+            )
+        } else {
+            AiReply(lastEntry, aiStatus[lastEntry.file.path], config) { actions.onSendToAi(lastEntry) }
+        }
     }
 }
 

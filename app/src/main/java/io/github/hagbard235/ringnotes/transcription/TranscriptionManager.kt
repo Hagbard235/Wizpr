@@ -81,6 +81,27 @@ class TranscriptionManager(
         main.post { add(wav) }
     }
 
+    private val _lastTestEntry = MutableStateFlow<String?>(null)
+
+    /** Path of the most recent typed test input, to show its result next to the input field. */
+    val lastTestEntry: StateFlow<String?> = _lastTestEntry.asStateFlow()
+
+    /**
+     * Debug aid: send typed text as if it had been spoken, bypassing speech
+     * recognition. Goes through the same forwarding (including answers to open
+     * smart-home questions) and shows up as a "test-…" entry in the recordings.
+     */
+    fun submitText(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        main.post {
+            val rec = store.createTextEntry(trimmed)
+            _lastTestEntry.value = rec.file.path
+            onRecordingsChanged()
+            forward(rec, trimmed)
+        }
+    }
+
     /** Forward an already transcribed recording to the AI target; for manual (re)sends. */
     fun sendToAi(recording: Recording) {
         val text = recording.transcript

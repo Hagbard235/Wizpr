@@ -28,11 +28,17 @@ import io.github.hagbard235.ringnotes.ai.AiConfig
 import io.github.hagbard235.ringnotes.ai.AiTarget
 
 @Composable
-fun AiSettingsTab(config: AiConfig, onUpdate: ((AiConfig) -> AiConfig) -> Unit) {
+fun AiSettingsTab(
+    config: AiConfig,
+    onUpdate: ((AiConfig) -> AiConfig) -> Unit,
+    testPanel: @Composable () -> Unit,
+) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (config.target != AiTarget.OFF) testPanel()
+
         Text("Transkripte weiterleiten", style = MaterialTheme.typography.titleMedium)
         Text(
             "Neue Aufnahmen werden im Hintergrund transkribiert und der Text automatisch hierhin geschickt. " +
