@@ -32,6 +32,11 @@ Unabhängiges Projekt auf Basis des Open-Source-[WizprRingSDK](https://github.co
     als Knöpfe in App und Benachrichtigung – oder einfach am Ring beantworten (die nächste
     Aufnahme gilt als Antwort). Antwort optional vorlesen und/oder Status-Ton. Aus Sicherheitsgründen
     gehen nur Aufnahmen automatisch raus, die höchstens 2 Minuten alt sind.
+- **Sprechen übers Handy-Mikrofon**: Knopf gedrückt halten oder die **Leiser-Taste gedrückt halten**
+  (ab 0,4 s). Die Lautstärke ändert sich dabei nicht, kurzes Drücken regelt weiterhin leiser.
+  In der App sofort; überall (bei eingeschaltetem Bildschirm) nach Aktivieren der Bedienungshilfe
+  „Ring Notes: Sprechen mit Leiser-Taste“. Die Aufnahme („phone-…“) läuft durch dieselbe Kette
+  wie eine Ring-Aufnahme. Vibration bei Start und Ende.
 - Aufnahmen abspielen, teilen (z. B. an eine Transkriptions-App) und löschen
 - Akkustand (automatisch alle 5 min), Mikrofon-Status, Klick/Doppelklick im Log
 - Sperren über den `LOCK`-Befehl mit host-seitiger Sperre (Aufnahmen werden ignoriert)

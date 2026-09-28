@@ -152,6 +152,11 @@ class RingController(private val context: Context) : RingGattClient.Listener {
         }
     }
 
+    /** Add a line to the event log from elsewhere in the app. */
+    fun logNote(text: String) {
+        handler.post { log(text) }
+    }
+
     fun requestBattery() {
         handler.post { gatt?.send(OperationCommand.BATTERY_STATUS) }
     }

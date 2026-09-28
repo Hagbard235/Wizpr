@@ -33,11 +33,18 @@ import io.github.hagbard235.ringnotes.transcriptions
 import io.github.hagbard235.ringnotes.aiSettings
 import io.github.hagbard235.ringnotes.symconJobs
 import io.github.hagbard235.ringnotes.ai.AiConfig
+import io.github.hagbard235.ringnotes.phoneRecorder
+import io.github.hagbard235.ringnotes.pushToTalk
+import android.provider.Settings
+import android.view.KeyEvent
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 class MainActivity : ComponentActivity() {
     private lateinit var scanner: RingScanner
     private val player = AudioPlayer()
     private var pendingAction: (() -> Unit)? = null
+    private var volumeKeyServiceEnabled by mutableStateOf(false)
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
@@ -85,6 +92,8 @@ class MainActivity : ComponentActivity() {
                 val aiConfig by aiSettings.config.collectAsStateWithLifecycle()
                 val symconViews by symconJobs.views.collectAsStateWithLifecycle()
                 val lastTestEntry by transcriptions.lastTestEntry.collectAsStateWithLifecycle()
+                val phoneTalking by phoneRecorder.active.collectAsStateWithLifecycle()
+                val volumeKeyEnabled by pushToTalk.volumeKeyEnabled.collectAsStateWithLifecycle()
 
                 RingScreen(
                     state = state,
@@ -98,6 +107,11 @@ class MainActivity : ComponentActivity() {
                     aiConfig = aiConfig,
                     symconViews = symconViews,
                     lastTestEntry = lastTestEntry,
+                    phoneMic = PhoneMicState(
+                        talking = phoneTalking,
+                        volumeKeyEnabled = volumeKeyEnabled,
+                        serviceEnabled = volumeKeyServiceEnabled,
+                    ),
                     actions = RingScreenActions(
                         onScan = { withBluetooth { scanner.start() } },
                         onStopScan = scanner::stop,
@@ -117,6 +131,14 @@ class MainActivity : ComponentActivity() {
                             symconJobs.answer(rec.file.path, optionId, text)
                         },
                         onSubmitText = { text: String -> transcriptions.submitText(text) },
+                        onTalkStart = {
+                            if (phoneRecorder.hasPermission()) pushToTalk.pressStart() else withMicPermission {}
+                        },
+                        onTalkEnd = { pushToTalk.pressEnd() },
+                        onVolumeKeyEnabled = { on: Boolean -> pushToTalk.setVolumeKeyEnabled(on) },
+                        onOpenAccessibilitySettings = {
+                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        },
                         onDelete = { rec: Recording ->
                             if (playing == rec.file) player.stop()
                             controller.delete(rec)
@@ -130,6 +152,23 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         transcriptions.setForeground(true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The user may have just switched the accessibility service on or off in the system settings.
+        volumeKeyServiceEnabled = pushToTalk.isServiceEnabled()
+    }
+
+    /** Hold volume-down to talk while the app is in front; the volume itself stays unchanged. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN && event.action == KeyEvent.ACTION_DOWN &&
+            event.repeatCount == 0 && pushToTalk.volumeKeyEnabled.value && !phoneRecorder.hasPermission()
+        ) {
+            withMicPermission {}
+            return true
+        }
+        return pushToTalk.onKeyEvent(event) || super.dispatchKeyEvent(event)
     }
 
     override fun onStop() {

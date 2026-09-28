@@ -27,11 +27,12 @@ data class Recording(
 class RecordingStore(context: Context) {
     val directory: File = File(context.filesDir, "recordings").apply { mkdirs() }
 
-    fun newFile(now: Long = System.currentTimeMillis()): File {
+    /** New WAV path; [prefix] tells the source apart: "ring", "phone" (handset mic) or "test" (typed). */
+    fun newFile(prefix: String = "ring", now: Long = System.currentTimeMillis()): File {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(now))
-        var file = File(directory, "ring-$stamp.wav")
+        var file = File(directory, "$prefix-$stamp.wav")
         var n = 2
-        while (file.exists()) file = File(directory, "ring-$stamp-${n++}.wav")
+        while (file.exists()) file = File(directory, "$prefix-$stamp-${n++}.wav")
         return file
     }
 
@@ -48,11 +49,8 @@ class RecordingStore(context: Context) {
      * only) plus the text as its transcript, so it flows through the same pipeline
      * and UI as a real recording.
      */
-    fun createTextEntry(text: String, now: Long = System.currentTimeMillis()): Recording {
-        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(now))
-        var file = File(directory, "test-$stamp.wav")
-        var n = 2
-        while (file.exists()) file = File(directory, "test-$stamp-${n++}.wav")
+    fun createTextEntry(text: String): Recording {
+        val file = newFile(prefix = "test")
         StreamingWavWriter(file).close()
         saveTranscript(file, text)
         return load(file)

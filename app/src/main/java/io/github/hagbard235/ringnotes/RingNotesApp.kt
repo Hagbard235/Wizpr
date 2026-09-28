@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import io.github.hagbard235.ringnotes.ai.AiSettings
 import io.github.hagbard235.ringnotes.feedback.Feedback
+import io.github.hagbard235.ringnotes.phone.PhoneRecorder
+import io.github.hagbard235.ringnotes.phone.PushToTalk
 import io.github.hagbard235.ringnotes.symcon.SymconJobs
 import io.github.hagbard235.ringnotes.transcription.TranscriptionManager
 
@@ -21,7 +23,31 @@ class RingNotesApp : Application() {
     val transcriptions: TranscriptionManager by lazy {
         TranscriptionManager(this, controller.store, aiSettings, symconJobs) { controller.refreshRecordings() }
     }
+
+    val phoneRecorder: PhoneRecorder by lazy {
+        PhoneRecorder(
+            context = this,
+            store = controller.store,
+            onSaved = { file ->
+                controller.logNote("Handy-Aufnahme gespeichert: ${file.name}")
+                controller.refreshRecordings()
+                transcriptions.enqueue(file)
+            },
+            onSilent = {
+                controller.logNote("Handy-Aufnahme verworfen: nur Stille (Mikrofon im Hintergrund gesperrt?)")
+                feedback.tone(Feedback.Tone.ERROR)
+            },
+        )
+    }
+
+    val pushToTalk: PushToTalk by lazy { PushToTalk(this, phoneRecorder, feedback) }
 }
+
+val Context.pushToTalk: PushToTalk
+    get() = (applicationContext as RingNotesApp).pushToTalk
+
+val Context.phoneRecorder: PhoneRecorder
+    get() = (applicationContext as RingNotesApp).phoneRecorder
 
 val Context.transcriptions: TranscriptionManager
     get() = (applicationContext as RingNotesApp).transcriptions

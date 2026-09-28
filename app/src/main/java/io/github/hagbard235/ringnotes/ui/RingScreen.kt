@@ -81,6 +81,18 @@ class RingScreenActions(
     val onSymconAnswer: (Recording, String?, String) -> Unit,
     /** Debug: send typed text instead of a recognized recording. */
     val onSubmitText: (String) -> Unit,
+    val onTalkStart: () -> Unit,
+    val onTalkEnd: () -> Unit,
+    val onVolumeKeyEnabled: (Boolean) -> Unit,
+    val onOpenAccessibilitySettings: () -> Unit,
+)
+
+/** Push-to-talk with the phone's microphone. */
+data class PhoneMicState(
+    val talking: Boolean,
+    val volumeKeyEnabled: Boolean,
+    /** Accessibility service on: the volume key works outside the app too. */
+    val serviceEnabled: Boolean,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,6 +109,7 @@ fun RingScreen(
     aiConfig: AiConfig,
     symconViews: Map<String, SymconView>,
     lastTestEntry: String?,
+    phoneMic: PhoneMicState,
     actions: RingScreenActions,
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
@@ -109,7 +122,7 @@ fun RingScreen(
                 Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("Log") })
             }
             when (tab) {
-                0 -> RingTab(state, found, scanning, scanError, actions)
+                0 -> RingTab(state, found, scanning, scanError, phoneMic, actions)
                 1 -> RecordingsTab(
                     state.recordings, playing, transcriptionStatus, transcriptionSupported, aiStatus, aiConfig,
                     symconViews, actions,
@@ -136,6 +149,7 @@ private fun RingTab(
     found: List<FoundRing>,
     scanning: Boolean,
     scanError: String?,
+    phoneMic: PhoneMicState,
     actions: RingScreenActions,
 ) {
     LazyColumn(
@@ -168,6 +182,8 @@ private fun RingTab(
                 }
             }
         }
+
+        item { PhoneMicCard(phoneMic, actions) }
 
         state.recording?.let { rec ->
             item {
