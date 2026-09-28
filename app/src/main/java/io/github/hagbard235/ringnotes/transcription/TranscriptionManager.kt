@@ -18,6 +18,7 @@ import io.github.hagbard235.ringnotes.ai.AiSettings
 import io.github.hagbard235.ringnotes.ai.AiTarget
 import io.github.hagbard235.ringnotes.recording.Recording
 import io.github.hagbard235.ringnotes.recording.RecordingStore
+import io.github.hagbard235.ringnotes.symcon.SymconJobs
 import io.github.hagbard235.ringnotes.ui.MainActivity
 import java.io.File
 import java.util.ArrayDeque
@@ -48,6 +49,7 @@ class TranscriptionManager(
     private val context: Context,
     private val store: RecordingStore,
     private val aiSettings: AiSettings,
+    private val symconJobs: SymconJobs,
     private val onRecordingsChanged: () -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
@@ -101,7 +103,9 @@ class TranscriptionManager(
             val path = rec.file.path
             if (rec.transcript == null) {
                 if (_status.value[path] == null) add(rec.file)
-            } else if (shouldAutoForward(rec) && rec.aiReply == null && _aiStatus.value[path] == null && config.isReady) {
+            } else if (shouldAutoForward(rec) && rec.aiReply == null && !symconJobs.hasJob(rec.file) &&
+                _aiStatus.value[path] == null && config.isReady
+            ) {
                 forward(rec, rec.transcript)
             }
         }
@@ -150,13 +154,23 @@ class TranscriptionManager(
 
     private fun shouldAutoForward(rec: Recording): Boolean {
         val config = aiSettings.config.value
-        return config.isReady && rec.createdAt >= config.enabledSince
+        if (!config.isReady || rec.createdAt < config.enabledSince) return false
+        // A switching command must not fire long after it was spoken (e.g. when a recording
+        // made in the background is only transcribed at the next app start): send those by hand.
+        if (config.target == AiTarget.SYMCON) {
+            return System.currentTimeMillis() - rec.createdAt <= SMART_HOME_MAX_AGE_MS
+        }
+        return true
     }
 
     private fun forward(rec: Recording, transcript: String) {
         val config = aiSettings.config.value
         if (!config.isReady) {
             setAiStatus(rec.file, TranscriptionStatus.Failed("KI-Weiterleitung ist nicht eingerichtet"))
+            return
+        }
+        if (config.target == AiTarget.SYMCON) {
+            symconJobs.submit(rec, transcript)
             return
         }
         if (_aiStatus.value[rec.file.path] == TranscriptionStatus.Running) return
@@ -209,5 +223,6 @@ class TranscriptionManager(
 
     private companion object {
         const val AI_CHANNEL = "ai"
+        const val SMART_HOME_MAX_AGE_MS = 2 * 60_000L
     }
 }

@@ -26,6 +26,12 @@ Unabhängiges Projekt auf Basis des Open-Source-[WizprRingSDK](https://github.co
     unter der Aufnahme und als Benachrichtigung.
   - oder einen **Webhook** (POST, JSON `{recording, createdAt, durationMs, transcript}`), z. B. für
     n8n, Home Assistant oder Make – von dort aus an jede beliebige KI oder App.
+  - oder den **KI-Dienst des Smarthomes (IP-Symcon)** nach dem Schnittstellenvertrag v1:
+    HTTPS mit Bearer-Schlüssel, eindeutige `requestId` pro Auftrag, Wiederholung nur mit
+    identischem Inhalt, Polling bei `pending` (max. 60 s, danach „Aktualisieren“), Rückfragen
+    als Knöpfe in App und Benachrichtigung – oder einfach am Ring beantworten (die nächste
+    Aufnahme gilt als Antwort). Antwort optional vorlesen und/oder Status-Ton. Aus Sicherheitsgründen
+    gehen nur Aufnahmen automatisch raus, die höchstens 2 Minuten alt sind.
 - Aufnahmen abspielen, teilen (z. B. an eine Transkriptions-App) und löschen
 - Akkustand (automatisch alle 5 min), Mikrofon-Status, Klick/Doppelklick im Log
 - Sperren über den `LOCK`-Befehl mit host-seitiger Sperre (Aufnahmen werden ignoriert)

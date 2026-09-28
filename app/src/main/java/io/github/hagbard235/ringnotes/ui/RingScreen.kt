@@ -50,9 +50,11 @@ import androidx.compose.ui.unit.dp
 import io.github.hagbard235.ringnotes.LinkState
 import io.github.hagbard235.ringnotes.RingUiState
 import io.github.hagbard235.ringnotes.ai.AiConfig
+import io.github.hagbard235.ringnotes.ai.AiTarget
 import io.github.hagbard235.ringnotes.ble.FoundRing
 import io.github.hagbard235.ringnotes.recording.Recording
 import io.github.hagbard235.ringnotes.statusText
+import io.github.hagbard235.ringnotes.symcon.SymconView
 import io.github.hagbard235.ringnotes.transcription.TranscriptionStatus
 import java.io.File
 import java.text.DateFormat
@@ -73,6 +75,9 @@ class RingScreenActions(
     val onTranscribe: (Recording) -> Unit,
     val onSendToAi: (Recording) -> Unit,
     val onUpdateAi: ((AiConfig) -> AiConfig) -> Unit,
+    val onSymconRefresh: (Recording) -> Unit,
+    /** optionId is null for a free-text answer. */
+    val onSymconAnswer: (Recording, String?, String) -> Unit,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,6 +92,7 @@ fun RingScreen(
     transcriptionSupported: Boolean,
     aiStatus: Map<String, TranscriptionStatus>,
     aiConfig: AiConfig,
+    symconViews: Map<String, SymconView>,
     actions: RingScreenActions,
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
@@ -101,7 +107,8 @@ fun RingScreen(
             when (tab) {
                 0 -> RingTab(state, found, scanning, scanError, actions)
                 1 -> RecordingsTab(
-                    state.recordings, playing, transcriptionStatus, transcriptionSupported, aiStatus, aiConfig, actions,
+                    state.recordings, playing, transcriptionStatus, transcriptionSupported, aiStatus, aiConfig,
+                    symconViews, actions,
                 )
                 2 -> AiSettingsTab(aiConfig, actions.onUpdateAi)
                 else -> LogTab(state)
@@ -203,6 +210,7 @@ private fun RecordingsTab(
     transcriptionSupported: Boolean,
     aiStatus: Map<String, TranscriptionStatus>,
     aiConfig: AiConfig,
+    symconViews: Map<String, SymconView>,
     actions: RingScreenActions,
 ) {
     var toDelete by remember { mutableStateOf<Recording?>(null) }
@@ -238,7 +246,16 @@ private fun RecordingsTab(
                     IconButton(onClick = { toDelete = rec }) { Icon(Icons.Default.Delete, contentDescription = "Löschen") }
                 }
                 Transcript(rec, transcriptionStatus[rec.file.path], transcriptionSupported) { actions.onTranscribe(rec) }
-                AiReply(rec, aiStatus[rec.file.path], aiConfig) { actions.onSendToAi(rec) }
+                val symcon = symconViews[rec.file.path]
+                if (symcon != null) {
+                    SymconCard(
+                        view = symcon,
+                        onRefresh = { actions.onSymconRefresh(rec) },
+                        onAnswer = { optionId, text -> actions.onSymconAnswer(rec, optionId, text) },
+                    )
+                } else {
+                    AiReply(rec, aiStatus[rec.file.path], aiConfig) { actions.onSendToAi(rec) }
+                }
                 HorizontalDivider()
             }
         }
@@ -315,7 +332,9 @@ private fun AiReply(rec: Recording, status: TranscriptionStatus?, config: AiConf
                     Text(rec.aiReply, style = MaterialTheme.typography.bodyMedium)
                 }
             }
-        canSend -> TextButton(onClick = onSend, modifier = Modifier.padding(start = 4.dp)) { Text("An KI senden") }
+        canSend -> TextButton(onClick = onSend, modifier = Modifier.padding(start = 4.dp)) {
+            Text(if (config.target == AiTarget.SYMCON) "An Smarthome senden" else "An KI senden")
+        }
     }
 }
 

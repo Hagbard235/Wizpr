@@ -17,6 +17,9 @@ kotlin {
 }
 
 dependencies {
+    // Android ships org.json in the platform, so the app gets it at runtime; only compile and test against it here.
+    compileOnly("org.json:json:20240303")
+    testImplementation("org.json:json:20240303")
     testImplementation(kotlin("test"))
 }
 

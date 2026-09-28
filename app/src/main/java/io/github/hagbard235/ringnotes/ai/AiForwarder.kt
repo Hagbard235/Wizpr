@@ -38,6 +38,8 @@ class AiForwarder {
         AiTarget.OFF -> Result.Failure("KI-Weiterleitung ist ausgeschaltet")
         AiTarget.CLAUDE -> askClaude(config, transcript)
         AiTarget.WEBHOOK -> postWebhook(config, recording, transcript)
+        // Handled by SymconJobs (polling, clarifications); never routed here.
+        AiTarget.SYMCON -> Result.Failure("Smarthome-Aufträge laufen über SymconJobs")
     }
 
     private fun claudeClient(apiKey: String): AnthropicClient {

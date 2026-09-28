@@ -31,6 +31,7 @@ import io.github.hagbard235.ringnotes.recording.Recording
 import io.github.hagbard235.ringnotes.ringController
 import io.github.hagbard235.ringnotes.transcriptions
 import io.github.hagbard235.ringnotes.aiSettings
+import io.github.hagbard235.ringnotes.symconJobs
 import io.github.hagbard235.ringnotes.ai.AiConfig
 
 class MainActivity : ComponentActivity() {
@@ -82,6 +83,7 @@ class MainActivity : ComponentActivity() {
                 val transcriptionStatus by transcriptions.status.collectAsStateWithLifecycle()
                 val aiStatus by transcriptions.aiStatus.collectAsStateWithLifecycle()
                 val aiConfig by aiSettings.config.collectAsStateWithLifecycle()
+                val symconViews by symconJobs.views.collectAsStateWithLifecycle()
 
                 RingScreen(
                     state = state,
@@ -93,6 +95,7 @@ class MainActivity : ComponentActivity() {
                     transcriptionSupported = transcriptions.isSupported,
                     aiStatus = aiStatus,
                     aiConfig = aiConfig,
+                    symconViews = symconViews,
                     actions = RingScreenActions(
                         onScan = { withBluetooth { scanner.start() } },
                         onStopScan = scanner::stop,
@@ -107,6 +110,10 @@ class MainActivity : ComponentActivity() {
                         onTranscribe = { rec: Recording -> withMicPermission { transcriptions.enqueue(rec.file) } },
                         onSendToAi = { rec: Recording -> transcriptions.sendToAi(rec) },
                         onUpdateAi = { change: (AiConfig) -> AiConfig -> aiSettings.update(change) },
+                        onSymconRefresh = { rec: Recording -> symconJobs.refresh(rec.file.path) },
+                        onSymconAnswer = { rec: Recording, optionId: String?, text: String ->
+                            symconJobs.answer(rec.file.path, optionId, text)
+                        },
                         onDelete = { rec: Recording ->
                             if (playing == rec.file) player.stop()
                             controller.delete(rec)

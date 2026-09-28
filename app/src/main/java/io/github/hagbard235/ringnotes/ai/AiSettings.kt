@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class AiTarget { OFF, CLAUDE, WEBHOOK }
+enum class AiTarget { OFF, CLAUDE, WEBHOOK, SYMCON }
 
 data class AiConfig(
     val target: AiTarget = AiTarget.OFF,
@@ -13,6 +13,13 @@ data class AiConfig(
     val claudeModel: String = DEFAULT_MODEL,
     val instruction: String = DEFAULT_INSTRUCTION,
     val webhookUrl: String = "",
+    /** IP-Symcon AI hook (contract v1): HTTPS URL and bearer access key. */
+    val symconUrl: String = "",
+    val symconKey: String = "",
+    /** Read replies aloud on the phone. */
+    val speakReplies: Boolean = true,
+    /** Play a short tone for success, question or error. */
+    val statusTone: Boolean = true,
     /** Only recordings created after this moment are forwarded automatically. */
     val enabledSince: Long = 0,
 ) {
@@ -21,7 +28,11 @@ data class AiConfig(
             AiTarget.OFF -> false
             AiTarget.CLAUDE -> claudeApiKey.isNotBlank() && claudeModel.isNotBlank()
             AiTarget.WEBHOOK -> webhookUrl.startsWith("https://") || webhookUrl.startsWith("http://")
+            AiTarget.SYMCON -> isSymconReady()
         }
+
+    /** The contract requires HTTPS with a bearer key. */
+    fun isSymconReady(): Boolean = symconUrl.startsWith("https://") && symconKey.isNotBlank()
 
     companion object {
         const val DEFAULT_MODEL = "claude-opus-5"
@@ -33,8 +44,8 @@ data class AiConfig(
 }
 
 /**
- * Forwarding settings, kept in app-private SharedPreferences. The API key never
- * leaves the device except in requests to the Claude API.
+ * Forwarding settings, kept in app-private SharedPreferences. Keys never leave
+ * the device except in requests to their own service.
  */
 class AiSettings(context: Context) {
     private val prefs = context.getSharedPreferences("ai", Context.MODE_PRIVATE)
@@ -44,7 +55,7 @@ class AiSettings(context: Context) {
     fun update(transform: (AiConfig) -> AiConfig) {
         val old = _config.value
         var new = transform(old)
-        if (old.target == AiTarget.OFF && new.target != AiTarget.OFF) {
+        if (old.target != new.target && new.target != AiTarget.OFF) {
             new = new.copy(enabledSince = System.currentTimeMillis())
         }
         prefs.edit()
@@ -53,6 +64,10 @@ class AiSettings(context: Context) {
             .putString("claudeModel", new.claudeModel)
             .putString("instruction", new.instruction)
             .putString("webhookUrl", new.webhookUrl)
+            .putString("symconUrl", new.symconUrl)
+            .putString("symconKey", new.symconKey)
+            .putBoolean("speakReplies", new.speakReplies)
+            .putBoolean("statusTone", new.statusTone)
             .putLong("enabledSince", new.enabledSince)
             .apply()
         _config.value = new
@@ -64,6 +79,10 @@ class AiSettings(context: Context) {
         claudeModel = prefs.getString("claudeModel", null) ?: AiConfig.DEFAULT_MODEL,
         instruction = prefs.getString("instruction", null) ?: AiConfig.DEFAULT_INSTRUCTION,
         webhookUrl = prefs.getString("webhookUrl", "") ?: "",
+        symconUrl = prefs.getString("symconUrl", "") ?: "",
+        symconKey = prefs.getString("symconKey", "") ?: "",
+        speakReplies = prefs.getBoolean("speakReplies", true),
+        statusTone = prefs.getBoolean("statusTone", true),
         enabledSince = prefs.getLong("enabledSince", 0),
     )
 }

@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +44,9 @@ fun AiSettingsTab(config: AiConfig, onUpdate: ((AiConfig) -> AiConfig) -> Unit) 
         TargetOption("Claude (Anthropic-API)", config.target == AiTarget.CLAUDE) { onUpdate { it.copy(target = AiTarget.CLAUDE) } }
         TargetOption("Webhook (z. B. n8n, Home Assistant, Make)", config.target == AiTarget.WEBHOOK) {
             onUpdate { it.copy(target = AiTarget.WEBHOOK) }
+        }
+        TargetOption("Smarthome (IP-Symcon KI-Dienst)", config.target == AiTarget.SYMCON) {
+            onUpdate { it.copy(target = AiTarget.SYMCON) }
         }
 
         when (config.target) {
@@ -97,12 +102,56 @@ fun AiSettingsTab(config: AiConfig, onUpdate: ((AiConfig) -> AiConfig) -> Unit) 
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+            AiTarget.SYMCON -> {
+                OutlinedTextField(
+                    value = config.symconUrl,
+                    onValueChange = { v -> onUpdate { it.copy(symconUrl = v.trim()) } },
+                    label = { Text("HTTPS-Adresse des KI-Dienstes") },
+                    placeholder = { Text("https://…") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    isError = config.symconUrl.isNotEmpty() && !config.symconUrl.startsWith("https://"),
+                    supportingText = { Text("Nur HTTPS. Vom Smarthome-Team bereitgestellt.") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = config.symconKey,
+                    onValueChange = { v -> onUpdate { it.copy(symconKey = v.trim()) } },
+                    label = { Text("Zugangsschlüssel") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    supportingText = { Text("Wird nur auf diesem Gerät gespeichert.") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                SwitchRow("Antwort vorlesen", config.speakReplies) { on -> onUpdate { it.copy(speakReplies = on) } }
+                SwitchRow("Status-Ton (Erfolg, Rückfrage, Fehler)", config.statusTone) { on ->
+                    onUpdate { it.copy(statusTone = on) }
+                }
+                Text(
+                    "Neue Aufnahmen gehen automatisch ans Smarthome, wenn sie höchstens 2 Minuten alt sind. " +
+                        "Ältere Aufnahmen nur per „An Smarthome senden“, damit kein veralteter Befehl ausgeführt wird. " +
+                        "Stellt das Smarthome eine Rückfrage, zählt die nächste Aufnahme am Ring als Antwort.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             AiTarget.OFF -> Unit
         }
 
         if (config.target != AiTarget.OFF && !config.isReady) {
             Text("Noch nicht vollständig eingerichtet.", color = MaterialTheme.colorScheme.error)
         }
+    }
+}
+
+@Composable
+private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().toggleable(value = checked, onValueChange = onChange, role = Role.Switch),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 

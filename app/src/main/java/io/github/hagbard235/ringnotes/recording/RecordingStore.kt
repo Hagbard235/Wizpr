@@ -46,6 +46,7 @@ class RecordingStore(context: Context) {
         recording.file.delete()
         transcriptFile(recording.file).delete()
         aiReplyFile(recording.file).delete()
+        File(directory, recording.file.nameWithoutExtension + ".symcon.json").delete()
     }
 
     fun saveTranscript(wav: File, text: String) {
