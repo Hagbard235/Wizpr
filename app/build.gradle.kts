@@ -16,6 +16,21 @@ android {
         versionName = "0.2.0"
     }
 
+    signingConfigs {
+        // Fixed debug key kept in the repo so every CI build installs over the previous one
+        // (a fresh runner would otherwise sign with a new random debug key each time).
+        // CI creates it on its first run; it is not a secret, it only signs debug builds.
+        getByName("debug") {
+            val fixedKey = file("debug.keystore")
+            if (fixedKey.exists()) {
+                storeFile = fixedKey
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

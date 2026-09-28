@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,6 +20,22 @@ jobs:
           java-version: 17
 
       - uses: gradle/actions/setup-gradle@v4
+
+      # Every build must be signed with the same key, or Android refuses to install an update
+      # over the previous version. Create that key once and commit it to the branch.
+      - name: Create fixed debug signing key (first run only)
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ ! -f app/debug.keystore ]; then
+            keytool -genkeypair -keystore app/debug.keystore -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/debug.keystore
+            git commit -m "Add fixed debug signing key for installable CI builds"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
 
       - name: Test protocol core
         run: ./gradlew -p ringcore test
