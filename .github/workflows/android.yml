@@ -47,3 +47,17 @@ jobs:
         with:
           name: ring-notes-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      # Artifacts occasionally fail to register on GitHub even after a successful upload,
+      # so the APK is also published to a rolling pre-release with a stable download link.
+      - name: Publish APK to the "debug-latest" pre-release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk ring-notes-debug.apk
+          gh release delete debug-latest --yes --cleanup-tag || true
+          gh release create debug-latest ring-notes-debug.apk \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Ring Notes – aktuelle Test-APK" \
+            --notes "Automatisch gebaut aus ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Lässt sich über ältere Versionen (ab 0.3.0) installieren."
