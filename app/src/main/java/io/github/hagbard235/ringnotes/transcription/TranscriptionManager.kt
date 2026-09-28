@@ -1,15 +1,28 @@
 package io.github.hagbard235.ringnotes.transcription
 
 import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import io.github.hagbard235.ringnotes.R
+import io.github.hagbard235.ringnotes.ai.AiForwarder
+import io.github.hagbard235.ringnotes.ai.AiSettings
+import io.github.hagbard235.ringnotes.ai.AiTarget
+import io.github.hagbard235.ringnotes.recording.Recording
 import io.github.hagbard235.ringnotes.recording.RecordingStore
+import io.github.hagbard235.ringnotes.ui.MainActivity
 import java.io.File
 import java.util.ArrayDeque
 import java.util.Locale
+import java.util.concurrent.Executors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,18 +35,25 @@ sealed interface TranscriptionStatus {
 }
 
 /**
- * Serial queue that transcribes recordings one at a time and stores the text
- * next to the WAV file. New recordings are transcribed automatically while the
- * app is in the foreground; the recognizer is not usable from the background,
- * so recordings made with the screen off are picked up on the next app start.
+ * Pipeline for finished recordings: transcribe on the device, then forward the
+ * text to the configured AI target (Claude or a webhook) and keep the reply.
+ *
+ * Runs in the background while [io.github.hagbard235.ringnotes.RingService] is
+ * up (it declares the microphone foreground-service type, which Android needs
+ * before it lets the speech recognizer run without a visible activity). Work
+ * that fails in the background is retried the next time the app is opened.
+ * Transcription state is touched only on the main thread.
  */
 class TranscriptionManager(
     private val context: Context,
     private val store: RecordingStore,
-    private val onTranscriptSaved: () -> Unit,
+    private val aiSettings: AiSettings,
+    private val onRecordingsChanged: () -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val transcriber = Transcriber(context)
+    private val forwarder = AiForwarder()
+    private val aiExecutor = Executors.newSingleThreadExecutor { Thread(it, "ai-forward") }
     private val queue = ArrayDeque<File>()
     private var running: File? = null
     private var foreground = false
@@ -41,20 +61,50 @@ class TranscriptionManager(
     private val _status = MutableStateFlow<Map<String, TranscriptionStatus>>(emptyMap())
     val status: StateFlow<Map<String, TranscriptionStatus>> = _status.asStateFlow()
 
+    private val _aiStatus = MutableStateFlow<Map<String, TranscriptionStatus>>(emptyMap())
+    val aiStatus: StateFlow<Map<String, TranscriptionStatus>> = _aiStatus.asStateFlow()
+
     val isSupported: Boolean get() = transcriber.isSupported()
 
     /** Language of the phone, e.g. "de-DE". */
     var languageTag: String = Locale.getDefault().toLanguageTag()
 
-    fun enqueue(wav: File) = main.post { add(wav) }
+    init {
+        val channel = NotificationChannel(AI_CHANNEL, "KI-Antworten", NotificationManager.IMPORTANCE_DEFAULT)
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
 
-    fun setForeground(isForeground: Boolean) = main.post {
-        foreground = isForeground
-        if (isForeground) {
-            store.list().filter { it.transcript == null && _status.value[it.file.path] == null }
-                .forEach { add(it.file) }
+    /** Transcribe (and then forward) one recording; also used for manual retries. */
+    fun enqueue(wav: File) {
+        main.post { add(wav) }
+    }
+
+    /** Forward an already transcribed recording to the AI target; for manual (re)sends. */
+    fun sendToAi(recording: Recording) {
+        val text = recording.transcript
+        if (text.isNullOrBlank()) return
+        forward(recording, text)
+    }
+
+    /** Called by the activity; when the app is opened, anything left over is picked up. */
+    fun setForeground(isForeground: Boolean) {
+        main.post {
+            foreground = isForeground
+            if (isForeground) catchUp()
+            next()
         }
-        next()
+    }
+
+    private fun catchUp() {
+        val config = aiSettings.config.value
+        for (rec in store.list()) {
+            val path = rec.file.path
+            if (rec.transcript == null) {
+                if (_status.value[path] == null) add(rec.file)
+            } else if (shouldAutoForward(rec) && rec.aiReply == null && _aiStatus.value[path] == null && config.isReady) {
+                forward(rec, rec.transcript)
+            }
+        }
     }
 
     private fun add(wav: File) {
@@ -65,7 +115,7 @@ class TranscriptionManager(
     }
 
     private fun next() {
-        if (running != null || !foreground) return
+        if (running != null) return
         val wav = queue.pollFirst() ?: return
         if (!wav.exists()) {
             setStatus(wav, null)
@@ -85,15 +135,79 @@ class TranscriptionManager(
                 is Transcriber.Result.Success -> {
                     store.saveTranscript(wav, result.text)
                     setStatus(wav, null)
-                    onTranscriptSaved()
+                    onRecordingsChanged()
+                    store.find(wav)?.let { rec ->
+                        if (result.text.isNotBlank() && shouldAutoForward(rec)) forward(rec, result.text)
+                    }
                 }
-                is Transcriber.Result.Failure -> setStatus(wav, TranscriptionStatus.Failed(result.message))
+                is Transcriber.Result.Failure ->
+                    // In the background the recognizer may refuse; leave it for the next app start.
+                    setStatus(wav, if (foreground) TranscriptionStatus.Failed(result.message) else null)
             }
             next()
         }
     }
 
+    private fun shouldAutoForward(rec: Recording): Boolean {
+        val config = aiSettings.config.value
+        return config.isReady && rec.createdAt >= config.enabledSince
+    }
+
+    private fun forward(rec: Recording, transcript: String) {
+        val config = aiSettings.config.value
+        if (!config.isReady) {
+            setAiStatus(rec.file, TranscriptionStatus.Failed("KI-Weiterleitung ist nicht eingerichtet"))
+            return
+        }
+        if (_aiStatus.value[rec.file.path] == TranscriptionStatus.Running) return
+        setAiStatus(rec.file, TranscriptionStatus.Running)
+        aiExecutor.execute {
+            val result = forwarder.forward(config, rec, transcript)
+            main.post {
+                when (result) {
+                    is AiForwarder.Result.Success -> {
+                        val reply = result.reply ?: "An Webhook gesendet."
+                        store.saveAiReply(rec.file, reply)
+                        setAiStatus(rec.file, null)
+                        onRecordingsChanged()
+                        if (config.target == AiTarget.CLAUDE && result.reply != null) notify(rec, result.reply)
+                    }
+                    is AiForwarder.Result.Failure -> setAiStatus(rec.file, TranscriptionStatus.Failed(result.message))
+                }
+            }
+        }
+    }
+
+    private fun notify(rec: Recording, reply: String) {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+        val open = PendingIntent.getActivity(
+            context, 0, Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(context, AI_CHANNEL)
+            .setSmallIcon(R.drawable.ic_ring)
+            .setContentTitle("Claude · ${rec.name}")
+            .setContentText(reply)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(reply))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(rec.file.path.hashCode(), notification)
+        } catch (_: SecurityException) {
+            // POST_NOTIFICATIONS not granted; the reply is still shown in the app.
+        }
+    }
+
     private fun setStatus(wav: File, status: TranscriptionStatus?) = _status.update {
         if (status == null) it - wav.path else it + (wav.path to status)
+    }
+
+    private fun setAiStatus(wav: File, status: TranscriptionStatus?) = _aiStatus.update {
+        if (status == null) it - wav.path else it + (wav.path to status)
+    }
+
+    private companion object {
+        const val AI_CHANNEL = "ai"
     }
 }

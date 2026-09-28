@@ -13,11 +13,16 @@ data class Recording(
     val durationMs: Long,
     /** Recognized text; null until transcribed, empty when no speech was recognized. */
     val transcript: String?,
+    /** Reply of the AI target (Claude or webhook), if the transcript was forwarded. */
+    val aiReply: String?,
 ) {
     val name: String get() = file.nameWithoutExtension
 }
 
-/** WAV files in the app's private `recordings/` directory (shared via FileProvider). */
+/**
+ * WAV files in the app's private `recordings/` directory (shared via FileProvider),
+ * with the transcript (`.txt`) and AI reply (`.ai.txt`) stored next to each one.
+ */
 class RecordingStore(context: Context) {
     val directory: File = File(context.filesDir, "recordings").apply { mkdirs() }
 
@@ -32,19 +37,38 @@ class RecordingStore(context: Context) {
     fun list(): List<Recording> =
         directory.listFiles { f -> f.isFile && f.extension == "wav" }
             .orEmpty()
-            .map { Recording(it, it.lastModified(), durationOf(it), transcriptFile(it).takeIf(File::exists)?.readText()) }
+            .map(::load)
             .sortedByDescending { it.createdAt }
+
+    fun find(wav: File): Recording? = if (wav.exists()) load(wav) else null
 
     fun delete(recording: Recording) {
         recording.file.delete()
         transcriptFile(recording.file).delete()
+        aiReplyFile(recording.file).delete()
     }
 
     fun saveTranscript(wav: File, text: String) {
         transcriptFile(wav).writeText(text)
     }
 
+    fun saveAiReply(wav: File, text: String) {
+        aiReplyFile(wav).writeText(text)
+    }
+
+    private fun load(wav: File) = Recording(
+        file = wav,
+        createdAt = wav.lastModified(),
+        durationMs = durationOf(wav),
+        transcript = transcriptFile(wav).readIfExists(),
+        aiReply = aiReplyFile(wav).readIfExists(),
+    )
+
     private fun transcriptFile(wav: File) = File(wav.parentFile, wav.nameWithoutExtension + ".txt")
+
+    private fun aiReplyFile(wav: File) = File(wav.parentFile, wav.nameWithoutExtension + ".ai.txt")
+
+    private fun File.readIfExists(): String? = if (exists()) readText() else null
 
     private fun durationOf(file: File): Long =
         ((file.length() - WAV_HEADER_BYTES).coerceAtLeast(0) / 2) * 1000 / WizprBle.SAMPLE_RATE_HZ

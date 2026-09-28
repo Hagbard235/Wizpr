@@ -30,6 +30,8 @@ import io.github.hagbard235.ringnotes.recording.AudioPlayer
 import io.github.hagbard235.ringnotes.recording.Recording
 import io.github.hagbard235.ringnotes.ringController
 import io.github.hagbard235.ringnotes.transcriptions
+import io.github.hagbard235.ringnotes.aiSettings
+import io.github.hagbard235.ringnotes.ai.AiConfig
 
 class MainActivity : ComponentActivity() {
     private lateinit var scanner: RingScanner
@@ -50,7 +52,11 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             val action = pendingTranscription
             pendingTranscription = null
-            if (granted) action?.invoke()
+            if (granted) {
+                // Re-promote the running service so it gains the microphone type for background transcription.
+                if (ringController.state.value.wantConnected) RingService.start(this)
+                action?.invoke()
+            }
         }
     private var pendingTranscription: (() -> Unit)? = null
 
@@ -74,6 +80,8 @@ class MainActivity : ComponentActivity() {
                 val scanError by scanner.error.collectAsStateWithLifecycle()
                 val playing by player.playing.collectAsStateWithLifecycle()
                 val transcriptionStatus by transcriptions.status.collectAsStateWithLifecycle()
+                val aiStatus by transcriptions.aiStatus.collectAsStateWithLifecycle()
+                val aiConfig by aiSettings.config.collectAsStateWithLifecycle()
 
                 RingScreen(
                     state = state,
@@ -83,6 +91,8 @@ class MainActivity : ComponentActivity() {
                     playing = playing,
                     transcriptionStatus = transcriptionStatus,
                     transcriptionSupported = transcriptions.isSupported,
+                    aiStatus = aiStatus,
+                    aiConfig = aiConfig,
                     actions = RingScreenActions(
                         onScan = { withBluetooth { scanner.start() } },
                         onStopScan = scanner::stop,
@@ -95,6 +105,8 @@ class MainActivity : ComponentActivity() {
                         onPlay = { rec: Recording -> player.toggle(rec.file) },
                         onShare = ::share,
                         onTranscribe = { rec: Recording -> withMicPermission { transcriptions.enqueue(rec.file) } },
+                        onSendToAi = { rec: Recording -> transcriptions.sendToAi(rec) },
+                        onUpdateAi = { change: (AiConfig) -> AiConfig -> aiSettings.update(change) },
                         onDelete = { rec: Recording ->
                             if (playing == rec.file) player.stop()
                             controller.delete(rec)

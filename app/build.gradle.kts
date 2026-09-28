@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.hagbard235.ringnotes"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -36,6 +36,11 @@ android {
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        // Duplicate license/metadata files from the Anthropic SDK's dependencies (Jackson, OkHttp).
+        resources.excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/versions/**")
+    }
 }
 
 dependencies {
@@ -46,6 +51,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-service:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("com.anthropic:anthropic-java:2.34.0")
 
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.ui:ui")

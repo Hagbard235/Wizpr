@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.github.hagbard235.ringnotes.LinkState
 import io.github.hagbard235.ringnotes.RingUiState
+import io.github.hagbard235.ringnotes.ai.AiConfig
 import io.github.hagbard235.ringnotes.ble.FoundRing
 import io.github.hagbard235.ringnotes.recording.Recording
 import io.github.hagbard235.ringnotes.statusText
@@ -70,6 +71,8 @@ class RingScreenActions(
     val onShare: (Recording) -> Unit,
     val onDelete: (Recording) -> Unit,
     val onTranscribe: (Recording) -> Unit,
+    val onSendToAi: (Recording) -> Unit,
+    val onUpdateAi: ((AiConfig) -> AiConfig) -> Unit,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,6 +85,8 @@ fun RingScreen(
     playing: File?,
     transcriptionStatus: Map<String, TranscriptionStatus>,
     transcriptionSupported: Boolean,
+    aiStatus: Map<String, TranscriptionStatus>,
+    aiConfig: AiConfig,
     actions: RingScreenActions,
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
@@ -90,11 +95,15 @@ fun RingScreen(
             TabRow(selectedTabIndex = tab) {
                 Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Ring") })
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Aufnahmen (${state.recordings.size})") })
-                Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Log") })
+                Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("KI") })
+                Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("Log") })
             }
             when (tab) {
                 0 -> RingTab(state, found, scanning, scanError, actions)
-                1 -> RecordingsTab(state.recordings, playing, transcriptionStatus, transcriptionSupported, actions)
+                1 -> RecordingsTab(
+                    state.recordings, playing, transcriptionStatus, transcriptionSupported, aiStatus, aiConfig, actions,
+                )
+                2 -> AiSettingsTab(aiConfig, actions.onUpdateAi)
                 else -> LogTab(state)
             }
         }
@@ -192,6 +201,8 @@ private fun RecordingsTab(
     playing: File?,
     transcriptionStatus: Map<String, TranscriptionStatus>,
     transcriptionSupported: Boolean,
+    aiStatus: Map<String, TranscriptionStatus>,
+    aiConfig: AiConfig,
     actions: RingScreenActions,
 ) {
     var toDelete by remember { mutableStateOf<Recording?>(null) }
@@ -227,6 +238,7 @@ private fun RecordingsTab(
                     IconButton(onClick = { toDelete = rec }) { Icon(Icons.Default.Delete, contentDescription = "Löschen") }
                 }
                 Transcript(rec, transcriptionStatus[rec.file.path], transcriptionSupported) { actions.onTranscribe(rec) }
+                AiReply(rec, aiStatus[rec.file.path], aiConfig) { actions.onSendToAi(rec) }
                 HorizontalDivider()
             }
         }
@@ -276,6 +288,34 @@ private fun Transcript(
                 )
             }
         supported -> TextButton(onClick = onTranscribe, modifier = Modifier.padding(start = 4.dp)) { Text("Transkribieren") }
+    }
+}
+
+@Composable
+private fun AiReply(rec: Recording, status: TranscriptionStatus?, config: AiConfig, onSend: () -> Unit) {
+    val modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+    val canSend = config.isReady && !rec.transcript.isNullOrBlank()
+    when {
+        status == TranscriptionStatus.Running ->
+            Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text("Wird an die KI gesendet …", style = MaterialTheme.typography.bodySmall)
+            }
+        status is TranscriptionStatus.Failed ->
+            Column(modifier) {
+                Text(status.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (canSend) TextButton(onClick = onSend) { Text("Erneut senden") }
+            }
+        rec.aiReply != null ->
+            Card(
+                modifier,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+            ) {
+                SelectionContainer(Modifier.padding(12.dp)) {
+                    Text(rec.aiReply, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        canSend -> TextButton(onClick = onSend, modifier = Modifier.padding(start = 4.dp)) { Text("An KI senden") }
     }
 }
 

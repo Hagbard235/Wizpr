@@ -15,8 +15,15 @@ Unabhängiges Projekt auf Basis des Open-Source-[WizprRingSDK](https://github.co
 - **Transkription auf dem Gerät**: Jede neue Aufnahme wird mit der On-Device-Spracherkennung
   des Handys (auf Pixel: Googles Offline-Erkennung) in Text umgewandelt – ohne Cloud und ohne
   Mikrofon, das WAV wird direkt eingespeist. Braucht Android 13+; Sprache = Systemsprache.
-  Aufnahmen, die bei ausgeschaltetem Bildschirm entstehen, werden beim nächsten Öffnen der App
-  transkribiert. Der Text ist markierbar und wird beim Teilen mitgeschickt.
+  Läuft im Hintergrund, solange der Ring verbunden ist (der Foreground-Service ist dafür zusätzlich
+  als Mikrofon-Dienst angemeldet, weil Android die Spracherkennung sonst nur im Vordergrund erlaubt).
+  Was im Hintergrund scheitert, wird beim nächsten Öffnen der App nachgeholt.
+- **KI-Weiterleitung** (Tab „KI“): Das Transkript jeder neuen Aufnahme geht automatisch an
+  - **Claude** über die Anthropic-API (eigener API-Schlüssel, Modell und Anweisung einstellbar;
+    Standard `claude-opus-5`, fasst zusammen und listet Aufgaben/Termine). Die Antwort erscheint
+    unter der Aufnahme und als Benachrichtigung.
+  - oder einen **Webhook** (POST, JSON `{recording, createdAt, durationMs, transcript}`), z. B. für
+    n8n, Home Assistant oder Make – von dort aus an jede beliebige KI oder App.
 - Aufnahmen abspielen, teilen (z. B. an eine Transkriptions-App) und löschen
 - Akkustand (automatisch alle 5 min), Mikrofon-Status, Klick/Doppelklick im Log
 - Sperren über den `LOCK`-Befehl mit host-seitiger Sperre (Aufnahmen werden ignoriert)

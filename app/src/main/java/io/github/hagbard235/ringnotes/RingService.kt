@@ -1,10 +1,12 @@
 package io.github.hagbard235.ringnotes
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -26,16 +28,7 @@ class RingService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        ServiceCompat.startForeground(
-            this,
-            NOTIFICATION_ID,
-            buildNotification(ringController.state.value),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            } else {
-                0
-            },
-        )
+        promote()
         lifecycleScope.launch {
             ringController.state
                 .map { NotificationContent(it.wantConnected, it.link, it.battery?.level, it.recording != null, it.locked) }
@@ -56,8 +49,39 @@ class RingService : LifecycleService() {
         if (intent?.action == ACTION_DISCONNECT) {
             ringController.disconnect()
             stopSelf()
+        } else {
+            // Re-promote so a microphone permission granted after the first start takes effect.
+            promote()
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Foreground types: connectedDevice for the ring link, plus microphone when
+     * RECORD_AUDIO is granted. The speech recognizer checks that permission, and
+     * Android only honours it in the background for a microphone-type service
+     * started while the app was visible — that is what makes background
+     * transcription work. The microphone itself is never opened.
+     */
+    private fun promote() {
+        var types = 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        ) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(ringController.state.value), types)
+        } catch (e: SecurityException) {
+            // Microphone type refused (e.g. started from the background); keep the ring link alive without it.
+            ServiceCompat.startForeground(
+                this, NOTIFICATION_ID, buildNotification(ringController.state.value),
+                types and ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE.inv(),
+            )
+        }
     }
 
     private data class NotificationContent(

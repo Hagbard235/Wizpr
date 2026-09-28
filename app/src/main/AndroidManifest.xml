@@ -22,6 +22,11 @@
 
     <!-- Required by SpeechRecognizer even when it transcribes a file instead of the microphone. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Lets the ring service keep that permission in the background, for background transcription. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- Forwarding transcripts to Claude or a webhook. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Package visibility for the speech recognition service (Android 11+). -->
     <queries>
@@ -51,7 +56,7 @@
         <service
             android:name=".RingService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice|microphone" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
