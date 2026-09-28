@@ -80,7 +80,13 @@ class RingController(private val context: Context) : RingGattClient.Listener {
     private var peak = 0
 
     private val clickTimeout = Runnable { dispatcher.onClickTimeout()?.let(::handleEvent) }
-    private val finalizeRecording = Runnable { finishRecording() }
+    // End-of-recording detection (see checkRecordingEnd).
+    private var lastAudioAt = 0L
+    private var stopSignalAt = 0L
+    private var stopReason = ""
+    private var packetsAfterStop = 0
+    private var droppedAudioPackets = 0
+    private val endWatch = Runnable { checkRecordingEnd() }
     private val reconnect = Runnable { device?.let { startGatt(it, autoConnect = true) } }
     private val batteryPoll = object : Runnable {
         override fun run() {
@@ -216,11 +222,22 @@ class RingController(private val context: Context) : RingGattClient.Listener {
     }
 
     private fun handleEvent(event: RingEvent) {
+        if (droppedAudioPackets > 0) {
+            log("$droppedAudioPackets Audiopakete außerhalb einer Aufnahme verworfen")
+            droppedAudioPackets = 0
+        }
         when (event) {
             RingEvent.RecordingStarted -> startRecording()
-            RingEvent.RecordingStopped -> onRecordingStopped()
-            RingEvent.MicOn -> _state.update { it.copy(micOn = true) }
-            RingEvent.MicOff -> _state.update { it.copy(micOn = false) }
+            RingEvent.RecordingStopped -> onStopSignal("Stoppsignal")
+            RingEvent.MicOn -> {
+                _state.update { it.copy(micOn = true) }
+                // Mic came back before the ring stopped the transfer: the user is still talking.
+                if (stopSignalAt != 0L && stopReason == MIC_OFF_REASON) stopSignalAt = 0L
+            }
+            RingEvent.MicOff -> {
+                _state.update { it.copy(micOn = false) }
+                onStopSignal(MIC_OFF_REASON)
+            }
             is RingEvent.BatteryUpdate -> _state.update { it.copy(battery = event) }
             else -> Unit
         }
@@ -243,12 +260,23 @@ class RingController(private val context: Context) : RingGattClient.Listener {
         writerFile = file
         recordingStartedAt = System.currentTimeMillis()
         peak = 0
+        lastAudioAt = SystemClock.elapsedRealtime()
+        stopSignalAt = 0L
+        packetsAfterStop = 0
+        handler.removeCallbacks(endWatch)
+        handler.postDelayed(endWatch, END_CHECK_MS)
         _state.update { it.copy(recording = ActiveRecording(file, recordingStartedAt, 0, 0f)) }
     }
 
     private fun handleAudio(pcm: ShortArray) {
         if (state.value.locked) return
-        val w = writer ?: return
+        val w = writer
+        if (w == null) {
+            droppedAudioPackets++
+            return
+        }
+        lastAudioAt = SystemClock.elapsedRealtime()
+        if (stopSignalAt != 0L) packetsAfterStop++
         try {
             w.append(pcm)
         } catch (e: IOException) {
@@ -268,15 +296,36 @@ class RingController(private val context: Context) : RingGattClient.Listener {
         }
     }
 
-    /** Keep collecting for a short drain window, like the SDK's desktop example. */
-    private fun onRecordingStopped() {
-        if (writer == null) return
-        handler.removeCallbacks(finalizeRecording)
-        handler.postDelayed(finalizeRecording, RECORDING_DRAIN_MS)
+    /** The ring signalled the end (transfer stop or mic off); the file closes once the audio has drained. */
+    private fun onStopSignal(reason: String) {
+        if (writer == null || stopSignalAt != 0L) return
+        stopSignalAt = SystemClock.elapsedRealtime()
+        stopReason = reason
     }
 
-    private fun finishRecording() {
-        handler.removeCallbacks(finalizeRecording)
+    /**
+     * Decides when a recording is over. The ring's stop signal alone is not
+     * enough: buffered audio can keep arriving after it, and sometimes the
+     * signal never comes. So a recording ends when
+     *  - a stop signal (transfer stop or mic off) arrived and no audio came for
+     *    [QUIET_AFTER_STOP_MS] (or [MAX_DRAIN_MS] passed since the signal), or
+     *  - no audio arrived for [IDLE_TIMEOUT_MS] even without a stop signal.
+     */
+    private fun checkRecordingEnd() {
+        if (writer == null) return
+        val now = SystemClock.elapsedRealtime()
+        val quietFor = now - lastAudioAt
+        when {
+            stopSignalAt != 0L && (quietFor >= QUIET_AFTER_STOP_MS || now - stopSignalAt >= MAX_DRAIN_MS) ->
+                finishRecording("$stopReason, $packetsAfterStop Pakete danach")
+            stopSignalAt == 0L && quietFor >= IDLE_TIMEOUT_MS -> finishRecording("kein Stoppsignal, Audio verstummt")
+            else -> handler.postDelayed(endWatch, END_CHECK_MS)
+        }
+    }
+
+    private fun finishRecording(reason: String? = null) {
+        handler.removeCallbacks(endWatch)
+        stopSignalAt = 0L
         val w = writer ?: return
         val file = writerFile
         writer = null
@@ -289,7 +338,8 @@ class RingController(private val context: Context) : RingGattClient.Listener {
         if (w.sampleCount == 0L) {
             file?.delete()
         } else {
-            log("Gespeichert: ${file?.name} (${"%.1f".format(w.durationMs / 1000f)} s)")
+            val why = reason?.let { "; Ende: $it" } ?: ""
+            log("Gespeichert: ${file?.name} (${"%.1f".format(w.durationMs / 1000f)} s$why)")
             file?.let { onRecordingSaved?.invoke(it) }
         }
         _state.update { it.copy(recording = null, recordings = store.list()) }
@@ -319,7 +369,11 @@ class RingController(private val context: Context) : RingGattClient.Listener {
         const val KEY_ADDRESS = "address"
         const val KEY_NAME = "name"
         const val WAV_GAIN = 3.0f
-        const val RECORDING_DRAIN_MS = 500L
+        const val MIC_OFF_REASON = "Mikrofon aus"
+        const val END_CHECK_MS = 100L
+        const val QUIET_AFTER_STOP_MS = 700L
+        const val MAX_DRAIN_MS = 5_000L
+        const val IDLE_TIMEOUT_MS = 3_000L
         const val RECONNECT_DELAY_MS = 1_000L
         const val BATTERY_POLL_MS = 5 * 60_000L
         const val LEVEL_UPDATE_MS = 100L

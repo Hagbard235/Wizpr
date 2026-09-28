@@ -10,7 +10,9 @@ Unabhängiges Projekt auf Basis des Open-Source-[WizprRingSDK](https://github.co
 
 - Ringe suchen (gleiche Erkennung wie das SDK: Service-UUID oder Name „WIZPR RING“) und verbinden
 - Aufnahmen vom Ring empfangen, IMA-ADPCM → 16 kHz PCM dekodieren, als WAV speichern
-  (3× Verstärkung und 500 ms Nachlauf wie im SDK-Desktop-Beispiel)
+  (3× Verstärkung wie im SDK-Desktop-Beispiel). Ende einer Aufnahme: nach Stoppsignal oder
+  „Mikrofon aus“ vom Ring, sobald 0,7 s kein Audio mehr kommt (max. 5 s Nachlauf); ohne Stoppsignal
+  nach 3 s Funkstille. Der Grund steht im Log bei „Gespeichert“.
 - Live-Pegel und Dauer während der Aufnahme
 - **Transkription auf dem Gerät**: Jede neue Aufnahme wird mit der On-Device-Spracherkennung
   des Handys (auf Pixel: Googles Offline-Erkennung) in Text umgewandelt – ohne Cloud und ohne
