@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -51,6 +52,7 @@ import io.github.hagbard235.ringnotes.RingUiState
 import io.github.hagbard235.ringnotes.ble.FoundRing
 import io.github.hagbard235.ringnotes.recording.Recording
 import io.github.hagbard235.ringnotes.statusText
+import io.github.hagbard235.ringnotes.transcription.TranscriptionStatus
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
@@ -67,6 +69,7 @@ class RingScreenActions(
     val onPlay: (Recording) -> Unit,
     val onShare: (Recording) -> Unit,
     val onDelete: (Recording) -> Unit,
+    val onTranscribe: (Recording) -> Unit,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -77,6 +80,8 @@ fun RingScreen(
     scanning: Boolean,
     scanError: String?,
     playing: File?,
+    transcriptionStatus: Map<String, TranscriptionStatus>,
+    transcriptionSupported: Boolean,
     actions: RingScreenActions,
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
@@ -89,7 +94,7 @@ fun RingScreen(
             }
             when (tab) {
                 0 -> RingTab(state, found, scanning, scanError, actions)
-                1 -> RecordingsTab(state.recordings, playing, actions)
+                1 -> RecordingsTab(state.recordings, playing, transcriptionStatus, transcriptionSupported, actions)
                 else -> LogTab(state)
             }
         }
@@ -182,7 +187,13 @@ private fun RingTab(
 }
 
 @Composable
-private fun RecordingsTab(recordings: List<Recording>, playing: File?, actions: RingScreenActions) {
+private fun RecordingsTab(
+    recordings: List<Recording>,
+    playing: File?,
+    transcriptionStatus: Map<String, TranscriptionStatus>,
+    transcriptionSupported: Boolean,
+    actions: RingScreenActions,
+) {
     var toDelete by remember { mutableStateOf<Recording?>(null) }
     if (recordings.isEmpty()) {
         Text(
@@ -193,28 +204,31 @@ private fun RecordingsTab(recordings: List<Recording>, playing: File?, actions: 
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
         items(recordings, key = { it.file.path }) { rec ->
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(rec.name, style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "${formatDuration(rec.durationMs)} · ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(rec.createdAt))}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                IconButton(onClick = { actions.onPlay(rec) }) {
-                    if (playing == rec.file) {
-                        Icon(Icons.Default.Close, contentDescription = "Stopp")
-                    } else {
-                        Icon(Icons.Default.PlayArrow, contentDescription = "Abspielen")
+            Column {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(rec.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "${formatDuration(rec.durationMs)} · ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(rec.createdAt))}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
+                    IconButton(onClick = { actions.onPlay(rec) }) {
+                        if (playing == rec.file) {
+                            Icon(Icons.Default.Close, contentDescription = "Stopp")
+                        } else {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Abspielen")
+                        }
+                    }
+                    IconButton(onClick = { actions.onShare(rec) }) { Icon(Icons.Default.Share, contentDescription = "Teilen") }
+                    IconButton(onClick = { toDelete = rec }) { Icon(Icons.Default.Delete, contentDescription = "Löschen") }
                 }
-                IconButton(onClick = { actions.onShare(rec) }) { Icon(Icons.Default.Share, contentDescription = "Teilen") }
-                IconButton(onClick = { toDelete = rec }) { Icon(Icons.Default.Delete, contentDescription = "Löschen") }
+                Transcript(rec, transcriptionStatus[rec.file.path], transcriptionSupported) { actions.onTranscribe(rec) }
+                HorizontalDivider()
             }
-            HorizontalDivider()
         }
     }
     toDelete?.let { rec ->
@@ -230,6 +244,38 @@ private fun RecordingsTab(recordings: List<Recording>, playing: File?, actions: 
             },
             dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Abbrechen") } },
         )
+    }
+}
+
+@Composable
+private fun Transcript(
+    rec: Recording,
+    status: TranscriptionStatus?,
+    supported: Boolean,
+    onTranscribe: () -> Unit,
+) {
+    val modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+    when {
+        status == TranscriptionStatus.Running ->
+            Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text("Wird transkribiert …", style = MaterialTheme.typography.bodySmall)
+            }
+        status == TranscriptionStatus.Queued ->
+            Text("Wartet auf Transkription …", style = MaterialTheme.typography.bodySmall, modifier = modifier)
+        status is TranscriptionStatus.Failed ->
+            Column(modifier) {
+                Text(status.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = onTranscribe) { Text("Erneut versuchen") }
+            }
+        rec.transcript != null ->
+            SelectionContainer(modifier) {
+                Text(
+                    rec.transcript.ifBlank { "(keine Sprache erkannt)" },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        supported -> TextButton(onClick = onTranscribe, modifier = Modifier.padding(start = 4.dp)) { Text("Transkribieren") }
     }
 }
 

@@ -57,6 +57,9 @@ class RingController(private val context: Context) : RingGattClient.Listener {
     private val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
     val store = RecordingStore(context)
 
+    /** Called on the ring thread with each newly saved WAV file. */
+    var onRecordingSaved: ((File) -> Unit)? = null
+
     private val _state = MutableStateFlow(
         RingUiState(
             deviceName = prefs.getString(KEY_NAME, null),
@@ -287,6 +290,7 @@ class RingController(private val context: Context) : RingGattClient.Listener {
             file?.delete()
         } else {
             log("Gespeichert: ${file?.name} (${"%.1f".format(w.durationMs / 1000f)} s)")
+            file?.let { onRecordingSaved?.invoke(it) }
         }
         _state.update { it.copy(recording = null, recordings = store.list()) }
     }

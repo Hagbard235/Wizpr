@@ -11,6 +11,8 @@ data class Recording(
     val file: File,
     val createdAt: Long,
     val durationMs: Long,
+    /** Recognized text; null until transcribed, empty when no speech was recognized. */
+    val transcript: String?,
 ) {
     val name: String get() = file.nameWithoutExtension
 }
@@ -30,12 +32,19 @@ class RecordingStore(context: Context) {
     fun list(): List<Recording> =
         directory.listFiles { f -> f.isFile && f.extension == "wav" }
             .orEmpty()
-            .map { Recording(it, it.lastModified(), durationOf(it)) }
+            .map { Recording(it, it.lastModified(), durationOf(it), transcriptFile(it).takeIf(File::exists)?.readText()) }
             .sortedByDescending { it.createdAt }
 
     fun delete(recording: Recording) {
         recording.file.delete()
+        transcriptFile(recording.file).delete()
     }
+
+    fun saveTranscript(wav: File, text: String) {
+        transcriptFile(wav).writeText(text)
+    }
+
+    private fun transcriptFile(wav: File) = File(wav.parentFile, wav.nameWithoutExtension + ".txt")
 
     private fun durationOf(file: File): Long =
         ((file.length() - WAV_HEADER_BYTES).coerceAtLeast(0) / 2) * 1000 / WizprBle.SAMPLE_RATE_HZ

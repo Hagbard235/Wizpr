@@ -29,6 +29,7 @@ import io.github.hagbard235.ringnotes.ble.RingScanner
 import io.github.hagbard235.ringnotes.recording.AudioPlayer
 import io.github.hagbard235.ringnotes.recording.Recording
 import io.github.hagbard235.ringnotes.ringController
+import io.github.hagbard235.ringnotes.transcriptions
 
 class MainActivity : ComponentActivity() {
     private lateinit var scanner: RingScanner
@@ -44,6 +45,14 @@ class MainActivity : ComponentActivity() {
                 pendingAction = null
             }
         }
+
+    private val micPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val action = pendingTranscription
+            pendingTranscription = null
+            if (granted) action?.invoke()
+        }
+    private var pendingTranscription: (() -> Unit)? = null
 
     private val enableBluetoothLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -64,6 +73,7 @@ class MainActivity : ComponentActivity() {
                 val scanning by scanner.scanning.collectAsStateWithLifecycle()
                 val scanError by scanner.error.collectAsStateWithLifecycle()
                 val playing by player.playing.collectAsStateWithLifecycle()
+                val transcriptionStatus by transcriptions.status.collectAsStateWithLifecycle()
 
                 RingScreen(
                     state = state,
@@ -71,6 +81,8 @@ class MainActivity : ComponentActivity() {
                     scanning = scanning,
                     scanError = scanError,
                     playing = playing,
+                    transcriptionStatus = transcriptionStatus,
+                    transcriptionSupported = transcriptions.isSupported,
                     actions = RingScreenActions(
                         onScan = { withBluetooth { scanner.start() } },
                         onStopScan = scanner::stop,
@@ -82,6 +94,7 @@ class MainActivity : ComponentActivity() {
                         onRequestBattery = controller::requestBattery,
                         onPlay = { rec: Recording -> player.toggle(rec.file) },
                         onShare = ::share,
+                        onTranscribe = { rec: Recording -> withMicPermission { transcriptions.enqueue(rec.file) } },
                         onDelete = { rec: Recording ->
                             if (playing == rec.file) player.stop()
                             controller.delete(rec)
@@ -92,9 +105,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        transcriptions.setForeground(true)
+    }
+
     override fun onStop() {
         super.onStop()
         scanner.stop()
+        transcriptions.setForeground(false)
     }
 
     override fun onDestroy() {
@@ -113,6 +132,7 @@ class MainActivity : ComponentActivity() {
         val send = Intent(Intent.ACTION_SEND)
             .setType("audio/wav")
             .putExtra(Intent.EXTRA_STREAM, uri)
+            .apply { recording.transcript?.takeIf { it.isNotBlank() }?.let { putExtra(Intent.EXTRA_TEXT, it) } }
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         startActivity(Intent.createChooser(send, recording.name))
     }
@@ -126,6 +146,16 @@ class MainActivity : ComponentActivity() {
             permissionLauncher.launch(missing.toTypedArray())
         } else {
             ensureBluetoothOn()
+        }
+    }
+
+    /** The speech recognizer demands RECORD_AUDIO even though it only reads our WAV file. */
+    private fun withMicPermission(action: () -> Unit) {
+        if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
+            action()
+        } else {
+            pendingTranscription = action
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -149,12 +179,11 @@ class MainActivity : ComponentActivity() {
             listOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
 
-    private fun optionalPermissions(): List<String> =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            listOf(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            emptyList()
-        }
+    private fun optionalPermissions(): List<String> = buildList {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        // Asked together with Bluetooth so new recordings can be transcribed automatically.
+        if (transcriptions.isSupported) add(Manifest.permission.RECORD_AUDIO)
+    }
 
     private fun hasPermission(permission: String) =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
