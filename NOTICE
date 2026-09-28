@@ -1,0 +1,11 @@
+Ring Notes
+Copyright 2026 hagbard235
+
+This product contains code ported from WizprRingSDK
+(https://github.com/vtouchio/wizpr-ring-sdk), Copyright VTouch Inc.,
+licensed under the Apache License, Version 2.0. The files under
+ringcore/src/main are Kotlin translations of wizpr-ring-core and parts of
+wizpr-ring and are marked as modified in their headers.
+
+WIZPR and WIZPR Ring are trademarks of VTouch Inc. This app is an
+independent project and is not affiliated with or endorsed by VTouch.
