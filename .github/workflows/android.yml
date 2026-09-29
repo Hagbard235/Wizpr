@@ -56,8 +56,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk ring-notes-debug.apk
-          gh release delete debug-latest --yes --cleanup-tag || true
-          gh release create debug-latest ring-notes-debug.apk \
-            --prerelease --target "$GITHUB_SHA" \
-            --title "Ring Notes – aktuelle Test-APK" \
-            --notes "Automatisch gebaut aus ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Lässt sich über ältere Versionen (ab 0.3.0) installieren."
+          notes="Automatisch gebaut aus ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Lässt sich über ältere Versionen (ab 0.3.0) installieren."
+          # Keep one release and replace its asset: deleting and recreating it races with the
+          # asset upload (the fresh release is not yet visible and the upload gets a 404).
+          if ! gh release view debug-latest > /dev/null 2>&1; then
+            gh release create debug-latest --prerelease --target "$GITHUB_SHA" \
+              --title "Ring Notes – aktuelle Test-APK" --notes "$notes"
+          fi
+          for attempt in 1 2 3 4 5; do
+            gh release upload debug-latest ring-notes-debug.apk --clobber && break
+            [ "$attempt" = 5 ] && exit 1
+            sleep $((attempt * 5))
+          done
+          gh release edit debug-latest --notes "$notes"
