@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import io.github.hagbard235.ringnotes.ai.AiSettings
 import io.github.hagbard235.ringnotes.feedback.Feedback
+import io.github.hagbard235.ringnotes.notes.NoteStore
 import io.github.hagbard235.ringnotes.phone.PhoneRecorder
 import io.github.hagbard235.ringnotes.phone.PushToTalk
 import io.github.hagbard235.ringnotes.symcon.SymconJobs
@@ -21,8 +22,12 @@ class RingNotesApp : Application() {
     val symconJobs: SymconJobs by lazy { SymconJobs(this, controller.store.directory, aiSettings, feedback) }
 
     val transcriptions: TranscriptionManager by lazy {
-        TranscriptionManager(this, controller.store, aiSettings, symconJobs) { controller.refreshRecordings() }
+        TranscriptionManager(this, controller.store, aiSettings, symconJobs, noteStore, feedback) {
+            controller.refreshRecordings()
+        }
     }
+
+    val noteStore: NoteStore by lazy { NoteStore(this) }
 
     val phoneRecorder: PhoneRecorder by lazy {
         PhoneRecorder(
@@ -42,6 +47,9 @@ class RingNotesApp : Application() {
 
     val pushToTalk: PushToTalk by lazy { PushToTalk(this, phoneRecorder, feedback) }
 }
+
+val Context.noteStore: NoteStore
+    get() = (applicationContext as RingNotesApp).noteStore
 
 val Context.pushToTalk: PushToTalk
     get() = (applicationContext as RingNotesApp).pushToTalk

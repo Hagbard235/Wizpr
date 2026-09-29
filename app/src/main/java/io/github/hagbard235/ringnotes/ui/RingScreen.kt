@@ -33,8 +33,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import io.github.hagbard235.ringnotes.notes.Note
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -110,24 +111,33 @@ fun RingScreen(
     symconViews: Map<String, SymconView>,
     lastTestEntry: String?,
     phoneMic: PhoneMicState,
+    notes: List<Note>,
+    noteTriggers: List<String>,
+    notesActions: NotesActions,
     actions: RingScreenActions,
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
+    val openNotes = notes.count { !it.shared }
     Scaffold(topBar = { TopAppBar(title = { Text("Ring Notes") }) }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            TabRow(selectedTabIndex = tab) {
+            ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
                 Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Ring") })
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Aufnahmen (${state.recordings.size})") })
-                Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("KI") })
-                Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("Log") })
+                Tab(
+                    selected = tab == 2, onClick = { tab = 2 },
+                    text = { Text(if (openNotes > 0) "Notizen ($openNotes)" else "Notizen") },
+                )
+                Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("KI") })
+                Tab(selected = tab == 4, onClick = { tab = 4 }, text = { Text("Log") })
             }
             when (tab) {
                 0 -> RingTab(state, found, scanning, scanError, phoneMic, actions)
                 1 -> RecordingsTab(
                     state.recordings, playing, transcriptionStatus, transcriptionSupported, aiStatus, aiConfig,
-                    symconViews, actions,
+                    symconViews, notes.mapNotNull { it.recording }.toSet(), actions,
                 )
-                2 -> AiSettingsTab(aiConfig, actions.onUpdateAi) {
+                2 -> NotesTab(notes, noteTriggers, notesActions)
+                3 -> AiSettingsTab(aiConfig, actions.onUpdateAi) {
                     TestInputPanel(
                         config = aiConfig,
                         lastEntry = state.recordings.firstOrNull { it.file.path == lastTestEntry },
@@ -239,6 +249,8 @@ private fun RecordingsTab(
     aiStatus: Map<String, TranscriptionStatus>,
     aiConfig: AiConfig,
     symconViews: Map<String, SymconView>,
+    /** Names of recordings that were kept as notes to self. */
+    noteRecordings: Set<String>,
     actions: RingScreenActions,
 ) {
     var toDelete by remember { mutableStateOf<Recording?>(null) }
@@ -275,14 +287,18 @@ private fun RecordingsTab(
                 }
                 Transcript(rec, transcriptionStatus[rec.file.path], transcriptionSupported) { actions.onTranscribe(rec) }
                 val symcon = symconViews[rec.file.path]
-                if (symcon != null) {
-                    SymconCard(
+                when {
+                    symcon != null -> SymconCard(
                         view = symcon,
                         onRefresh = { actions.onSymconRefresh(rec) },
                         onAnswer = { optionId, text -> actions.onSymconAnswer(rec, optionId, text) },
                     )
-                } else {
-                    AiReply(rec, aiStatus[rec.file.path], aiConfig) { actions.onSendToAi(rec) }
+                    rec.name in noteRecordings -> Text(
+                        "📝 Als Notiz gespeichert (Tab „Notizen“)",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 16.dp, bottom = 8.dp),
+                    )
+                    else -> AiReply(rec, aiStatus[rec.file.path], aiConfig) { actions.onSendToAi(rec) }
                 }
                 HorizontalDivider()
             }

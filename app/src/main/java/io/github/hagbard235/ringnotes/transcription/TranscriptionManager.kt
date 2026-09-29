@@ -16,6 +16,10 @@ import io.github.hagbard235.ringnotes.R
 import io.github.hagbard235.ringnotes.ai.AiForwarder
 import io.github.hagbard235.ringnotes.ai.AiSettings
 import io.github.hagbard235.ringnotes.ai.AiTarget
+import io.github.hagbard235.ringnotes.feedback.Feedback
+import io.github.hagbard235.ringnotes.notes.Note
+import io.github.hagbard235.ringnotes.notes.NoteStore
+import io.github.hagbard235.ringnotes.notes.ShareNoteActivity
 import io.github.hagbard235.ringnotes.recording.Recording
 import io.github.hagbard235.ringnotes.recording.RecordingStore
 import io.github.hagbard235.ringnotes.symcon.SymconJobs
@@ -50,6 +54,8 @@ class TranscriptionManager(
     private val store: RecordingStore,
     private val aiSettings: AiSettings,
     private val symconJobs: SymconJobs,
+    private val noteStore: NoteStore,
+    private val feedback: Feedback,
     private val onRecordingsChanged: () -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
@@ -98,7 +104,55 @@ class TranscriptionManager(
             val rec = store.createTextEntry(trimmed)
             _lastTestEntry.value = rec.file.path
             onRecordingsChanged()
-            forward(rec, trimmed)
+            if (!keepAsNote(rec, trimmed)) forward(rec, trimmed)
+        }
+    }
+
+    /**
+     * "Notiz an mich selbst …" and similar: store the rest locally and forward
+     * nothing. Returns true when [text] was such a note (also if saved earlier).
+     */
+    private fun keepAsNote(rec: Recording, text: String): Boolean {
+        val body = noteStore.match(text) ?: return false
+        if (noteStore.notes.value.any { it.recording == rec.name }) return true
+        val note = noteStore.add(body, rec.name)
+        val config = aiSettings.config.value
+        if (config.statusTone) feedback.tone(Feedback.Tone.SUCCESS)
+        if (config.speakReplies) feedback.speak("Notiz gespeichert", languageTag)
+        notifyNote(note)
+        return true
+    }
+
+    private fun notifyNote(note: Note) {
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) return
+        val id = note.id.hashCode()
+        val toKeep = PendingIntent.getActivity(
+            context, id,
+            Intent(context, ShareNoteActivity::class.java)
+                .putExtra(ShareNoteActivity.EXTRA_NOTE_ID, note.id)
+                .putExtra(ShareNoteActivity.EXTRA_NOTIFICATION_ID, id)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(context, AI_CHANNEL)
+            .setSmallIcon(R.drawable.ic_ring)
+            .setContentTitle("Notiz gespeichert")
+            .setContentText(note.text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(note.text))
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    context, 0, Intent(context, MainActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
+            .addAction(0, "An Keep", toKeep)
+            .setAutoCancel(true)
+            .build()
+        try {
+            manager.notify(id, notification)
+        } catch (_: SecurityException) {
+            // Notifications not permitted; the note is still in the app.
         }
     }
 
@@ -124,6 +178,8 @@ class TranscriptionManager(
             val path = rec.file.path
             if (rec.transcript == null) {
                 if (_status.value[path] == null) add(rec.file)
+            } else if (noteStore.match(rec.transcript) != null) {
+                continue
             } else if (shouldAutoForward(rec) && rec.aiReply == null && !symconJobs.hasJob(rec.file) &&
                 _aiStatus.value[path] == null && config.isReady
             ) {
@@ -162,7 +218,9 @@ class TranscriptionManager(
                     setStatus(wav, null)
                     onRecordingsChanged()
                     store.find(wav)?.let { rec ->
-                        if (result.text.isNotBlank() && shouldAutoForward(rec)) forward(rec, result.text)
+                        if (result.text.isNotBlank() && !keepAsNote(rec, result.text) && shouldAutoForward(rec)) {
+                            forward(rec, result.text)
+                        }
                     }
                 }
                 is Transcriber.Result.Failure ->

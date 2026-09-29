@@ -37,6 +37,10 @@ Unabhängiges Projekt auf Basis des Open-Source-[WizprRingSDK](https://github.co
   In der App sofort; überall (bei eingeschaltetem Bildschirm) nach Aktivieren der Bedienungshilfe
   „Ring Notes: Sprechen mit Leiser-Taste“. Die Aufnahme („phone-…“) läuft durch dieselbe Kette
   wie eine Ring-Aufnahme. Vibration bei Start und Ende.
+- **„Notiz an mich selbst“**: Beginnt eine Aufnahme mit einem Stichwort („Notiz an mich selbst“,
+  „Notiz“, „Merk dir“ … – im Tab „Notizen“ anpassbar), wird der Rest lokal als Notiz gespeichert und
+  **nicht** weitergeleitet. Bestätigung per Ton/Sprache und Benachrichtigung mit „An Keep“; im Tab
+  „Notizen“ einzeln oder gesammelt an Google Keep teilen (sonst Teilen-Menü), kopieren, löschen.
 - Aufnahmen abspielen, teilen (z. B. an eine Transkriptions-App) und löschen
 - Akkustand (automatisch alle 5 min), Mikrofon-Status, Klick/Doppelklick im Log
 - Sperren über den `LOCK`-Befehl mit host-seitiger Sperre (Aufnahmen werden ignoriert)

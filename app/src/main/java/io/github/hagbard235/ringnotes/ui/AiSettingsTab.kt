@@ -130,10 +130,6 @@ fun AiSettingsTab(
                     supportingText = { Text("Wird nur auf diesem Gerät gespeichert.") },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                SwitchRow("Antwort vorlesen", config.speakReplies) { on -> onUpdate { it.copy(speakReplies = on) } }
-                SwitchRow("Status-Ton (Erfolg, Rückfrage, Fehler)", config.statusTone) { on ->
-                    onUpdate { it.copy(statusTone = on) }
-                }
                 Text(
                     "Neue Aufnahmen gehen automatisch ans Smarthome, wenn sie höchstens 2 Minuten alt sind. " +
                         "Ältere Aufnahmen nur per „An Smarthome senden“, damit kein veralteter Befehl ausgeführt wird. " +
@@ -142,6 +138,14 @@ fun AiSettingsTab(
                 )
             }
             AiTarget.OFF -> Unit
+        }
+
+        Text("Rückmeldung am Handy", style = MaterialTheme.typography.titleMedium)
+        SwitchRow("Antworten vorlesen (Smarthome, „Notiz gespeichert“)", config.speakReplies) { on ->
+            onUpdate { it.copy(speakReplies = on) }
+        }
+        SwitchRow("Status-Ton (Erfolg, Rückfrage, Fehler)", config.statusTone) { on ->
+            onUpdate { it.copy(statusTone = on) }
         }
 
         if (config.target != AiTarget.OFF && !config.isReady) {

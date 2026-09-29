@@ -61,6 +61,14 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice|microphone" />
 
+        <activity
+            android:name=".notes.ShareNoteActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <receiver
             android:name=".symcon.SymconReplyReceiver"
             android:exported="false" />

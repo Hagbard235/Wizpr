@@ -34,6 +34,11 @@ import io.github.hagbard235.ringnotes.aiSettings
 import io.github.hagbard235.ringnotes.symconJobs
 import io.github.hagbard235.ringnotes.ai.AiConfig
 import io.github.hagbard235.ringnotes.phoneRecorder
+import io.github.hagbard235.ringnotes.noteStore
+import io.github.hagbard235.ringnotes.notes.Note
+import io.github.hagbard235.ringnotes.notes.NoteStore
+import android.content.ClipData
+import android.content.ClipboardManager
 import io.github.hagbard235.ringnotes.pushToTalk
 import android.provider.Settings
 import android.view.KeyEvent
@@ -94,6 +99,8 @@ class MainActivity : ComponentActivity() {
                 val lastTestEntry by transcriptions.lastTestEntry.collectAsStateWithLifecycle()
                 val phoneTalking by phoneRecorder.active.collectAsStateWithLifecycle()
                 val volumeKeyEnabled by pushToTalk.volumeKeyEnabled.collectAsStateWithLifecycle()
+                val notes by noteStore.notes.collectAsStateWithLifecycle()
+                val noteTriggers by noteStore.triggers.collectAsStateWithLifecycle()
 
                 RingScreen(
                     state = state,
@@ -111,6 +118,19 @@ class MainActivity : ComponentActivity() {
                         talking = phoneTalking,
                         volumeKeyEnabled = volumeKeyEnabled,
                         serviceEnabled = volumeKeyServiceEnabled,
+                    ),
+                    notes = notes,
+                    noteTriggers = noteTriggers,
+                    notesActions = NotesActions(
+                        onShare = { list: List<Note> ->
+                            if (NoteStore.shareToKeep(this, list)) noteStore.markShared(list.map { it.id })
+                        },
+                        onCopy = { note: Note ->
+                            getSystemService(ClipboardManager::class.java)
+                                .setPrimaryClip(ClipData.newPlainText("Notiz", note.text))
+                        },
+                        onDelete = { note: Note -> noteStore.delete(note.id) },
+                        onSetTriggers = { input: String -> noteStore.setTriggers(input) },
                     ),
                     actions = RingScreenActions(
                         onScan = { withBluetooth { scanner.start() } },
