@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
                         onDismiss = {
                             crashReporter.markSeen()
                             pendingCrash = null
+                            transcriptions.setForeground(true)
                         },
                     )
                 }
@@ -206,7 +207,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        transcriptions.setForeground(true)
+        // Safe mode after a crash: no background catch-up until the report dialog is closed,
+        // so a recording that crashes the app cannot hide the report again.
+        if (pendingCrash == null) transcriptions.setForeground(true)
     }
 
     override fun onResume() {

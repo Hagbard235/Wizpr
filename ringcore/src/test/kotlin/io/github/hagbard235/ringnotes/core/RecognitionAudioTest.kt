@@ -31,6 +31,17 @@ class RecognitionAudioTest {
     }
 
     @Test
+    fun chunkedGainMatchesWholeFile() {
+        val samples = ShortArray(1000) { ((it % 50) * 60 - 1500).toShort() }
+        val whole = RecognitionAudio.prepare(samples, sampleRate = 1000)
+        val gain = RecognitionAudio.gainForPeak(samples.maxOf { kotlin.math.abs(it.toInt()) })
+        val chunk = samples.copyOf()
+        RecognitionAudio.applyGain(chunk, chunk.size, gain)
+        val lead = RecognitionAudio.leadSamples(1000)
+        kotlin.test.assertContentEquals(whole.copyOfRange(lead, lead + samples.size), chunk)
+    }
+
+    @Test
     fun appliedGainStaysInRange() {
         val out = RecognitionAudio.prepare(shortArrayOf(4000, -4000), sampleRate = 1000)
         val lead = 1000 * RecognitionAudio.LEAD_SILENCE_MS / 1000

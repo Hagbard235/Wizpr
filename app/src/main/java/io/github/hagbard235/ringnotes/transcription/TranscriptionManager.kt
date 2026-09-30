@@ -177,7 +177,12 @@ class TranscriptionManager(
         for (rec in store.list()) {
             val path = rec.file.path
             if (rec.transcript == null) {
-                if (_status.value[path] == null) add(rec.file)
+                if (inProgressMarker(rec.file).exists()) {
+                    // The app died while transcribing this one: don't retry on its own (crash loop).
+                    setStatus(rec.file, TranscriptionStatus.Failed("Transkription wurde abgebrochen – bitte erneut versuchen"))
+                } else if (_status.value[path] == null) {
+                    add(rec.file)
+                }
             } else if (noteStore.match(rec.transcript) != null) {
                 continue
             } else if (shouldAutoForward(rec) && rec.aiReply == null && !symconJobs.hasJob(rec.file) &&
@@ -211,13 +216,11 @@ class TranscriptionManager(
         running = wav
         setStatus(wav, TranscriptionStatus.Running)
         val config = aiSettings.config.value
-        transcriber.transcribe(
-            wav = wav,
-            languageTag = languageTag,
-            online = config.onlineRecognition,
-            biasing = noteStore.triggers.value + config.vocabularyList,
-        ) { result ->
+        val marker = inProgressMarker(wav)
+        runCatching { marker.writeText(System.currentTimeMillis().toString()) }
+        val onResult: (Transcriber.Result) -> Unit = { result ->
             running = null
+            marker.delete()
             when (result) {
                 is Transcriber.Result.Success -> {
                     store.saveTranscript(wav, result.text)
@@ -235,7 +238,25 @@ class TranscriptionManager(
             }
             next()
         }
+        try {
+            transcriber.transcribe(
+                wav = wav,
+                languageTag = languageTag,
+                online = config.onlineRecognition,
+                biasing = noteStore.triggers.value + config.vocabularyList,
+                onDone = onResult,
+            )
+        } catch (t: Throwable) {
+            // One broken recording must never take the app down.
+            onResult(Transcriber.Result.Failure("Transkription fehlgeschlagen: ${t.javaClass.simpleName}"))
+        }
     }
+
+    /**
+     * Exists while a recording is being transcribed. If the process dies meanwhile, it is
+     * still there at the next start and that recording is not retried automatically.
+     */
+    private fun inProgressMarker(wav: File) = File(wav.parentFile, wav.nameWithoutExtension + ".transcribing")
 
     private fun shouldAutoForward(rec: Recording): Boolean {
         val config = aiSettings.config.value

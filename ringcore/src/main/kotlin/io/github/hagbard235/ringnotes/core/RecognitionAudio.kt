@@ -21,19 +21,35 @@ object RecognitionAudio {
     fun gainFor(samples: ShortArray): Float {
         var peak = 0
         for (s in samples) peak = maxOf(peak, abs(s.toInt()))
-        if (peak == 0) return 1f
+        return gainForPeak(peak)
+    }
+
+    /** Same as [gainFor] for a peak measured elsewhere (e.g. while streaming a long file). */
+    fun gainForPeak(peak: Int): Float {
+        if (peak <= 0) return 1f
         return (TARGET_PEAK / peak).coerceIn(1f, MAX_GAIN)
+    }
+
+    fun leadSamples(sampleRate: Int = WizprBle.SAMPLE_RATE_HZ) = sampleRate * LEAD_SILENCE_MS / 1000
+
+    fun tailSamples(sampleRate: Int = WizprBle.SAMPLE_RATE_HZ) = sampleRate * TAIL_SILENCE_MS / 1000
+
+    /** Apply [gain] in place with clipping; for chunk-wise processing of long recordings. */
+    fun applyGain(chunk: ShortArray, count: Int, gain: Float) {
+        if (gain == 1f) return
+        for (i in 0 until count) {
+            chunk[i] = (chunk[i] * gain).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        }
     }
 
     fun prepare(samples: ShortArray, sampleRate: Int = WizprBle.SAMPLE_RATE_HZ): ShortArray {
         val gain = gainFor(samples)
-        val lead = sampleRate * LEAD_SILENCE_MS / 1000
-        val tail = sampleRate * TAIL_SILENCE_MS / 1000
-        val out = ShortArray(lead + samples.size + tail)
-        for (i in samples.indices) {
-            val v = (samples[i] * gain).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-            out[lead + i] = v.toShort()
-        }
+        val lead = leadSamples(sampleRate)
+        val out = ShortArray(lead + samples.size + tailSamples(sampleRate))
+        samples.copyInto(out, destinationOffset = lead)
+        val body = samples.copyOf()
+        applyGain(body, body.size, gain)
+        body.copyInto(out, destinationOffset = lead)
         return out
     }
 }

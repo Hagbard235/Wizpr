@@ -29,6 +29,7 @@ import java.nio.ByteOrder
  * are transcribed completely. Must be used on the main thread.
  */
 class Transcriber(private val context: Context) {
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     sealed interface Result {
         data class Success(val text: String) : Result
@@ -55,38 +56,79 @@ class Transcriber(private val context: Context) {
             onDone(Result.Failure("On-Device-Spracherkennung braucht Android 13+ mit Google-Spracherkennung"))
             return
         }
-        val pcm = try {
-            RecognitionAudio.prepare(readPcm(wav))
-        } catch (e: IOException) {
-            onDone(Result.Failure("Aufnahme nicht lesbar: ${e.message}"))
-            return
-        }
+        // Recordings can be long: never load them whole. The peak is measured in one
+        // streaming pass off the main thread; the pump applies the gain chunk by chunk.
+        Thread({
+            val gain = try {
+                RecognitionAudio.gainForPeak(peakOf(wav))
+            } catch (e: Exception) {
+                mainHandler.post { onDone(Result.Failure("Aufnahme nicht lesbar: ${e.message}")) }
+                return@Thread
+            }
+            mainHandler.post { recognize(wav, gain, languageTag, online, biasing, onDone) }
+        }, "transcribe-peak").start()
+    }
+
+    private fun recognize(
+        wav: File,
+        gain: Float,
+        languageTag: String,
+        online: Boolean,
+        biasing: List<String>,
+        onDone: (Result) -> Unit,
+    ) {
         if (online && SpeechRecognizer.isRecognitionAvailable(context)) {
-            start(pcm, languageTag, online = true, biasing) { result ->
+            start(wav, gain, languageTag, online = true, biasing) { result ->
                 if (result is Result.Failure) {
                     Log.i(TAG, "Online recognition failed (${result.message}), falling back to on-device")
-                    start(pcm, languageTag, online = false, biasing, onDone)
+                    start(wav, gain, languageTag, online = false, biasing, onDone)
                 } else {
                     onDone(result)
                 }
             }
         } else {
-            start(pcm, languageTag, online = false, biasing, onDone)
+            start(wav, gain, languageTag, online = false, biasing, onDone)
         }
     }
 
-    /** The 16-bit mono PCM samples after the 44-byte WAV header. */
-    private fun readPcm(wav: File): ShortArray {
-        val bytes = wav.readBytes()
-        if (bytes.size <= WAV_HEADER_BYTES) return ShortArray(0)
-        val buffer = ByteBuffer.wrap(bytes, WAV_HEADER_BYTES.toInt(), bytes.size - WAV_HEADER_BYTES.toInt())
-            .order(ByteOrder.LITTLE_ENDIAN)
-            .asShortBuffer()
-        return ShortArray(buffer.remaining()).also { buffer.get(it) }
+    /** Loudest sample of the WAV payload, read in small chunks. */
+    private fun peakOf(wav: File): Int {
+        var peak = 0
+        forEachChunk(wav) { chunk, count ->
+            for (i in 0 until count) peak = maxOf(peak, kotlin.math.abs(chunk[i].toInt()))
+        }
+        return peak
+    }
+
+    /** Streams the 16-bit little-endian PCM after the 44-byte header in chunks of up to 8192 samples. */
+    private fun forEachChunk(wav: File, block: (ShortArray, Int) -> Unit) {
+        val bytes = ByteArray(CHUNK_SAMPLES * 2)
+        val samples = ShortArray(CHUNK_SAMPLES)
+        wav.inputStream().buffered().use { input ->
+            input.skip(WAV_HEADER_BYTES)
+            while (true) {
+                val n = input.readNBytesCompat(bytes)
+                if (n <= 1) break
+                val count = n / 2
+                ByteBuffer.wrap(bytes, 0, count * 2).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(samples, 0, count)
+                block(samples, count)
+                if (n < bytes.size) break
+            }
+        }
+    }
+
+    private fun java.io.InputStream.readNBytesCompat(buffer: ByteArray): Int {
+        var total = 0
+        while (total < buffer.size) {
+            val r = read(buffer, total, buffer.size - total)
+            if (r < 0) break
+            total += r
+        }
+        return total
     }
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    private fun start(pcm: ShortArray, languageTag: String, online: Boolean, biasing: List<String>, onDone: (Result) -> Unit) {
+    private fun start(wav: File, gain: Float, languageTag: String, online: Boolean, biasing: List<String>, onDone: (Result) -> Unit) {
         val (readSide, writeSide) = ParcelFileDescriptor.createPipe()
         val recognizer = if (online) {
             SpeechRecognizer.createSpeechRecognizer(context)
@@ -159,7 +201,8 @@ class Transcriber(private val context: Context) {
         })
 
         // Safety net in case the recognizer never reports back: audio length plus a minute.
-        val audioMs = pcm.size.toLong() * 1000 / WizprBle.SAMPLE_RATE_HZ
+        val audioMs = (wav.length() - WAV_HEADER_BYTES).coerceAtLeast(0) / 2 * 1000 / WizprBle.SAMPLE_RATE_HZ +
+            RecognitionAudio.LEAD_SILENCE_MS + RecognitionAudio.TAIL_SILENCE_MS
         timeout = Runnable {
             finish(if (segments.isEmpty()) Result.Failure("Spracherkennung hat nicht geantwortet") else Result.Success(text()))
         }.also { handler.postDelayed(it, audioMs + 60_000) }
@@ -171,17 +214,38 @@ class Transcriber(private val context: Context) {
             finish(Result.Failure("Spracherkennung konnte nicht starten: ${e.message}"))
             return
         }
-        pumpPcm(pcm, writeSide)
+        pumpPcm(wav, gain, writeSide)
     }
 
-    /** Writes the prepared PCM (little-endian 16 bit) into the pipe on a background thread. */
-    private fun pumpPcm(pcm: ShortArray, writeSide: ParcelFileDescriptor) {
+    /**
+     * Streams lead silence, the recording with [gain] applied and tail silence into the
+     * pipe on a background thread, chunk by chunk (constant memory for any length).
+     */
+    private fun pumpPcm(wav: File, gain: Float, writeSide: ParcelFileDescriptor) {
         Thread({
             try {
                 ParcelFileDescriptor.AutoCloseOutputStream(writeSide).use { out ->
-                    val bytes = ByteBuffer.allocate(pcm.size * 2).order(ByteOrder.LITTLE_ENDIAN)
-                    bytes.asShortBuffer().put(pcm)
-                    out.write(bytes.array())
+                    val bytes = ByteBuffer.allocate(CHUNK_SAMPLES * 2).order(ByteOrder.LITTLE_ENDIAN)
+                    fun write(samples: ShortArray, count: Int) {
+                        bytes.clear()
+                        bytes.asShortBuffer().put(samples, 0, count)
+                        out.write(bytes.array(), 0, count * 2)
+                    }
+                    val silence = ShortArray(CHUNK_SAMPLES)
+                    fun writeSilence(total: Int) {
+                        var left = total
+                        while (left > 0) {
+                            val n = minOf(left, CHUNK_SAMPLES)
+                            write(silence, n)
+                            left -= n
+                        }
+                    }
+                    writeSilence(RecognitionAudio.leadSamples())
+                    forEachChunk(wav) { chunk, count ->
+                        RecognitionAudio.applyGain(chunk, count, gain)
+                        write(chunk, count)
+                    }
+                    writeSilence(RecognitionAudio.tailSamples())
                 }
             } catch (e: IOException) {
                 // The recognizer closed its end early (finished or failed); nothing left to do.
@@ -214,5 +278,6 @@ class Transcriber(private val context: Context) {
         const val TAG = "Transcriber"
         const val WAV_HEADER_BYTES = 44L
         const val MAX_BIASING = 100
+        const val CHUNK_SAMPLES = 8192
     }
 }
