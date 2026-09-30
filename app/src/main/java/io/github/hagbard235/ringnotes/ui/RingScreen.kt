@@ -87,6 +87,7 @@ class RingScreenActions(
     val onTalkEnd: () -> Unit,
     val onVolumeKeyEnabled: (Boolean) -> Unit,
     val onMicGain: (Float) -> Unit,
+    val onShareDiagnosis: () -> Unit,
     val onMicAutoLevel: (Boolean) -> Unit,
     val onOpenAccessibilitySettings: () -> Unit,
 )
@@ -152,7 +153,7 @@ fun RingScreen(
                         actions = actions,
                     )
                 }
-                else -> LogTab(state)
+                else -> LogTab(state, actions.onShareDiagnosis)
             }
         }
     }
@@ -475,9 +476,18 @@ private fun AiReply(rec: Recording, status: TranscriptionStatus?, config: AiConf
 }
 
 @Composable
-private fun LogTab(state: RingUiState) {
+private fun LogTab(state: RingUiState, onShareDiagnosis: () -> Unit) {
     val format = remember { DateFormat.getTimeInstance(DateFormat.MEDIUM) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+        item {
+            Column(Modifier.padding(bottom = 8.dp)) {
+                OutlinedButton(onClick = onShareDiagnosis) { Text("Diagnose teilen") }
+                Text(
+                    "Letzter Absturz, dieses Log und die Systemmeldungen der App – ohne Einstellungen und Schlüssel.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
         items(state.log) { entry ->
             Text(
                 "${format.format(Date(entry.time))}  ${entry.text}",

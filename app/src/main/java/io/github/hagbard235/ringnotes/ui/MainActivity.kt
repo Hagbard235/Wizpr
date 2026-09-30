@@ -34,6 +34,8 @@ import io.github.hagbard235.ringnotes.aiSettings
 import io.github.hagbard235.ringnotes.symconJobs
 import io.github.hagbard235.ringnotes.ai.AiConfig
 import io.github.hagbard235.ringnotes.phoneRecorder
+import io.github.hagbard235.ringnotes.crashReporter
+import io.github.hagbard235.ringnotes.diagnostics.CrashReporter
 import io.github.hagbard235.ringnotes.noteStore
 import io.github.hagbard235.ringnotes.notes.Note
 import io.github.hagbard235.ringnotes.notes.NoteStore
@@ -50,6 +52,12 @@ class MainActivity : ComponentActivity() {
     private val player = AudioPlayer()
     private var pendingAction: (() -> Unit)? = null
     private var volumeKeyServiceEnabled by mutableStateOf(false)
+    private var pendingCrash by mutableStateOf<String?>(null)
+
+    private fun shareDiagnosis() {
+        val log = ringController.state.value.log.map { "${java.util.Date(it.time)}  ${it.text}" }
+        CrashReporter.share(this, crashReporter.diagnosis(log))
+    }
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
@@ -84,9 +92,24 @@ class MainActivity : ComponentActivity() {
         scanner = RingScanner(bluetoothAdapter())
         val controller = ringController
         controller.refreshRecordings()
+        pendingCrash = runCatching { crashReporter.unseenCrash() }.getOrNull()
 
         setContent {
             RingNotesTheme {
+                pendingCrash?.let { report ->
+                    CrashDialog(
+                        report = report,
+                        onShare = { shareDiagnosis() },
+                        onCopy = {
+                            getSystemService(ClipboardManager::class.java)
+                                .setPrimaryClip(ClipData.newPlainText("Absturzbericht", report))
+                        },
+                        onDismiss = {
+                            crashReporter.markSeen()
+                            pendingCrash = null
+                        },
+                    )
+                }
                 val state by controller.state.collectAsStateWithLifecycle()
                 val found by scanner.results.collectAsStateWithLifecycle()
                 val scanning by scanner.scanning.collectAsStateWithLifecycle()
@@ -162,6 +185,7 @@ class MainActivity : ComponentActivity() {
                         onTalkEnd = { pushToTalk.pressEnd() },
                         onVolumeKeyEnabled = { on: Boolean -> pushToTalk.setVolumeKeyEnabled(on) },
                         onMicGain = { g: Float -> phoneRecorder.setGain(g) },
+                        onShareDiagnosis = { shareDiagnosis() },
                         onMicAutoLevel = { on: Boolean -> phoneRecorder.setAutoLevel(on) },
                         onOpenAccessibilitySettings = {
                             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))

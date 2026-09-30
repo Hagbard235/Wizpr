@@ -3,6 +3,7 @@ package io.github.hagbard235.ringnotes
 import android.app.Application
 import android.content.Context
 import io.github.hagbard235.ringnotes.ai.AiSettings
+import io.github.hagbard235.ringnotes.diagnostics.CrashReporter
 import io.github.hagbard235.ringnotes.feedback.Feedback
 import io.github.hagbard235.ringnotes.notes.NoteStore
 import io.github.hagbard235.ringnotes.phone.PhoneRecorder
@@ -11,6 +12,13 @@ import io.github.hagbard235.ringnotes.symcon.SymconJobs
 import io.github.hagbard235.ringnotes.transcription.TranscriptionManager
 
 class RingNotesApp : Application() {
+    val crashReporter: CrashReporter by lazy { CrashReporter(this) }
+
+    override fun onCreate() {
+        super.onCreate()
+        crashReporter.install()
+    }
+
     val controller: RingController by lazy {
         RingController(this).also { c -> c.onRecordingSaved = { transcriptions.enqueue(it) } }
     }
@@ -47,6 +55,9 @@ class RingNotesApp : Application() {
 
     val pushToTalk: PushToTalk by lazy { PushToTalk(this, phoneRecorder, feedback) }
 }
+
+val Context.crashReporter: CrashReporter
+    get() = (applicationContext as RingNotesApp).crashReporter
 
 val Context.noteStore: NoteStore
     get() = (applicationContext as RingNotesApp).noteStore
