@@ -101,6 +101,8 @@ class MainActivity : ComponentActivity() {
                 val volumeKeyEnabled by pushToTalk.volumeKeyEnabled.collectAsStateWithLifecycle()
                 val notes by noteStore.notes.collectAsStateWithLifecycle()
                 val noteTriggers by noteStore.triggers.collectAsStateWithLifecycle()
+                val micGain by phoneRecorder.gain.collectAsStateWithLifecycle()
+                val micAutoLevel by phoneRecorder.autoLevel.collectAsStateWithLifecycle()
 
                 RingScreen(
                     state = state,
@@ -118,6 +120,9 @@ class MainActivity : ComponentActivity() {
                         talking = phoneTalking,
                         volumeKeyEnabled = volumeKeyEnabled,
                         serviceEnabled = volumeKeyServiceEnabled,
+                        gain = micGain,
+                        autoLevel = micAutoLevel,
+                        autoLevelAvailable = phoneRecorder.autoLevelAvailable,
                     ),
                     notes = notes,
                     noteTriggers = noteTriggers,
@@ -156,6 +161,8 @@ class MainActivity : ComponentActivity() {
                         },
                         onTalkEnd = { pushToTalk.pressEnd() },
                         onVolumeKeyEnabled = { on: Boolean -> pushToTalk.setVolumeKeyEnabled(on) },
+                        onMicGain = { g: Float -> phoneRecorder.setGain(g) },
+                        onMicAutoLevel = { on: Boolean -> phoneRecorder.setAutoLevel(on) },
                         onOpenAccessibilitySettings = {
                             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                         },

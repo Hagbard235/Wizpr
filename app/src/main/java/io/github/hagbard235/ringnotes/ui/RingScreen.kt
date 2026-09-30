@@ -86,6 +86,8 @@ class RingScreenActions(
     val onTalkStart: () -> Unit,
     val onTalkEnd: () -> Unit,
     val onVolumeKeyEnabled: (Boolean) -> Unit,
+    val onMicGain: (Float) -> Unit,
+    val onMicAutoLevel: (Boolean) -> Unit,
     val onOpenAccessibilitySettings: () -> Unit,
 )
 
@@ -95,6 +97,9 @@ data class PhoneMicState(
     val volumeKeyEnabled: Boolean,
     /** Accessibility service on: the volume key works outside the app too. */
     val serviceEnabled: Boolean,
+    val gain: Float = 3f,
+    val autoLevel: Boolean = true,
+    val autoLevelAvailable: Boolean = false,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

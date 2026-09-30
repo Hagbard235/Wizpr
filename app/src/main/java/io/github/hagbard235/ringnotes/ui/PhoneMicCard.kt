@@ -13,7 +13,9 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import io.github.hagbard235.ringnotes.phone.PhoneRecorder
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,6 +57,26 @@ fun PhoneMicCard(mic: PhoneMicState, actions: RingScreenActions) {
                     if (mic.talking) "● Aufnahme – loslassen zum Senden" else "Gedrückt halten zum Sprechen",
                     color = MaterialTheme.colorScheme.onPrimary,
                 )
+            }
+            Text("Mikrofon-Verstärkung: ${"%.1f".format(mic.gain)}×", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = mic.gain,
+                onValueChange = current.onMicGain,
+                valueRange = PhoneRecorder.MIN_GAIN..PhoneRecorder.MAX_GAIN,
+                steps = 13,
+            )
+            if (mic.autoLevelAvailable) {
+                Row(
+                    Modifier.fillMaxWidth().toggleable(
+                        value = mic.autoLevel,
+                        onValueChange = current.onMicAutoLevel,
+                        role = Role.Switch,
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Automatische Pegelanpassung und Rauschunterdrückung", modifier = Modifier.weight(1f))
+                    Switch(checked = mic.autoLevel, onCheckedChange = null)
+                }
             }
             Row(
                 Modifier.fillMaxWidth().toggleable(

@@ -6,6 +6,9 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -41,6 +44,30 @@ class PhoneRecorder(
     private val _active = MutableStateFlow(false)
     val active: StateFlow<Boolean> = _active.asStateFlow()
 
+    private val prefs = context.getSharedPreferences("phone", Context.MODE_PRIVATE)
+
+    /** Gain applied while recording (the recognition source has no automatic gain). */
+    private val _gain = MutableStateFlow(prefs.getFloat(KEY_GAIN, DEFAULT_GAIN))
+    val gain: StateFlow<Float> = _gain.asStateFlow()
+
+    /** Use the phone's automatic gain control and noise suppression, if it has them. */
+    private val _autoLevel = MutableStateFlow(prefs.getBoolean(KEY_AUTO_LEVEL, true))
+    val autoLevel: StateFlow<Boolean> = _autoLevel.asStateFlow()
+
+    fun setGain(value: Float) {
+        val g = value.coerceIn(MIN_GAIN, MAX_GAIN)
+        prefs.edit().putFloat(KEY_GAIN, g).apply()
+        _gain.value = g
+    }
+
+    fun setAutoLevel(on: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_LEVEL, on).apply()
+        _autoLevel.value = on
+    }
+
+    /** Whether this phone offers automatic gain control for recordings. */
+    val autoLevelAvailable: Boolean get() = AutomaticGainControl.isAvailable()
+
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
@@ -64,10 +91,12 @@ class PhoneRecorder(
             record.release()
             return false
         }
+        val effects = if (_autoLevel.value) attachLevelEffects(record.audioSessionId) else emptyList()
         val file = store.newFile(prefix = "phone")
         val writer = try {
-            StreamingWavWriter(file)
+            StreamingWavWriter(file, gain = _gain.value)
         } catch (e: Exception) {
+            effects.forEach { it.release() }
             record.release()
             return false
         }
@@ -77,6 +106,7 @@ class PhoneRecorder(
             Log.w(TAG, "startRecording failed", e)
         }
         if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            effects.forEach { it.release() }
             record.release()
             writer.close()
             file.delete()
@@ -101,6 +131,7 @@ class PhoneRecorder(
                 Log.w(TAG, "Recording failed", e)
             } finally {
                 runCatching { record.stop() }
+                effects.forEach { runCatching { it.release() } }
                 record.release()
                 runCatching { writer.close() }
                 main.post { finish(file, writer.durationMs, peak) }
@@ -119,6 +150,16 @@ class PhoneRecorder(
         running = false
     }
 
+    /** Automatic gain control and noise suppression, where the phone provides them. */
+    private fun attachLevelEffects(sessionId: Int): List<AudioEffect> = buildList {
+        if (AutomaticGainControl.isAvailable()) {
+            runCatching { AutomaticGainControl.create(sessionId) }.getOrNull()?.let { it.setEnabled(true); add(it) }
+        }
+        if (NoiseSuppressor.isAvailable()) {
+            runCatching { NoiseSuppressor.create(sessionId) }.getOrNull()?.let { it.setEnabled(true); add(it) }
+        }
+    }
+
     private fun finish(file: File, durationMs: Long, peak: Int) {
         _active.value = false
         currentFile = null
@@ -132,8 +173,13 @@ class PhoneRecorder(
         }
     }
 
-    private companion object {
-        const val TAG = "PhoneRecorder"
+    companion object {
+        private const val TAG = "PhoneRecorder"
+        private const val KEY_GAIN = "gain"
+        private const val KEY_AUTO_LEVEL = "autoLevel"
+        const val MIN_GAIN = 1f
+        const val MAX_GAIN = 8f
+        const val DEFAULT_GAIN = 3f
         const val MIN_DURATION_MS = 400L
         const val SILENCE_PEAK = 64
     }
