@@ -140,6 +140,28 @@ fun AiSettingsTab(
             AiTarget.OFF -> Unit
         }
 
+        Text("Spracherkennung", style = MaterialTheme.typography.titleMedium)
+        SwitchRow("Genauere Online-Erkennung (Google)", config.onlineRecognition) { on ->
+            onUpdate { it.copy(onlineRecognition = on) }
+        }
+        Text(
+            if (config.onlineRecognition) {
+                "Audio geht zur Erkennung an Google. Klappt das nicht, wird automatisch auf dem Gerät erkannt."
+            } else {
+                "Erkennung komplett auf dem Gerät; es verlässt kein Ton das Handy."
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedTextField(
+            value = config.vocabulary,
+            onValueChange = { v -> onUpdate { it.copy(vocabulary = v) } },
+            label = { Text("Wörter, die oft vorkommen") },
+            placeholder = { Text("z. B. Sternenhimmel, Treppenhaus, Rollladen") },
+            supportingText = { Text("Durch Komma getrennt; hilft der Erkennung bei Gerätenamen und Fachwörtern.") },
+            minLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
         Text("Rückmeldung am Handy", style = MaterialTheme.typography.titleMedium)
         SwitchRow("Antworten vorlesen (Smarthome, „Notiz gespeichert“)", config.speakReplies) { on ->
             onUpdate { it.copy(speakReplies = on) }

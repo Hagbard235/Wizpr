@@ -33,9 +33,15 @@ class PushToTalk(
     private val _volumeKeyEnabled = MutableStateFlow(prefs.getBoolean(KEY_ENABLED, true))
     val volumeKeyEnabled: StateFlow<Boolean> = _volumeKeyEnabled.asStateFlow()
 
-    private val startTalking = Runnable {
+    /** Recording was started right at key-down (so the first words are not lost). */
+    private var keyRecording = false
+    private var held = false
+
+    /** Fires once the key has been held long enough: from now on it is push-to-talk, not volume-down. */
+    private val confirmHold = Runnable {
         if (!keyDown) return@Runnable
-        talking = begin()
+        held = true
+        if (keyRecording) vibrate(START_MS) else feedback.tone(Feedback.Tone.ERROR)
     }
 
     fun setVolumeKeyEnabled(enabled: Boolean) {
@@ -58,23 +64,27 @@ class PushToTalk(
             KeyEvent.ACTION_DOWN -> {
                 if (event.repeatCount == 0 && !keyDown) {
                     keyDown = true
-                    talking = false
-                    main.postDelayed(startTalking, HOLD_MS)
+                    held = false
+                    // Start recording immediately; a short press discards it again.
+                    keyRecording = recorder.start()
+                    main.postDelayed(confirmHold, HOLD_MS)
                 }
                 return true
             }
             KeyEvent.ACTION_UP -> {
-                main.removeCallbacks(startTalking)
-                if (talking) {
-                    end()
+                main.removeCallbacks(confirmHold)
+                if (held) {
+                    if (keyRecording) end()
                 } else if (keyDown) {
+                    if (keyRecording) recorder.cancel()
                     // Short press: behave like a normal volume-down.
                     context.getSystemService(AudioManager::class.java).adjustSuggestedStreamVolume(
                         AudioManager.ADJUST_LOWER, AudioManager.USE_DEFAULT_STREAM_TYPE, AudioManager.FLAG_SHOW_UI,
                     )
                 }
                 keyDown = false
-                talking = false
+                held = false
+                keyRecording = false
                 return true
             }
         }

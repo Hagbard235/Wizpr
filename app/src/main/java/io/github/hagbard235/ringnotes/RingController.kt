@@ -165,6 +165,21 @@ class RingController(private val context: Context) : RingGattClient.Listener {
         handler.post { _state.update { it.copy(recordings = store.list()) } }
     }
 
+    /**
+     * Delete every recording with its transcript and replies, except files still
+     * being written (the ring's current recording and anything in [keep]).
+     * Notes to self are stored separately and stay.
+     */
+    fun deleteAll(keep: Set<File> = emptySet()) {
+        handler.post {
+            val skip = keep + listOfNotNull(writerFile)
+            val victims = store.list().filterNot { it.file in skip }
+            victims.forEach(store::delete)
+            _state.update { it.copy(recordings = store.list()) }
+            log("${victims.size} Aufnahmen gelöscht")
+        }
+    }
+
     fun delete(recording: Recording) {
         handler.post {
             store.delete(recording)

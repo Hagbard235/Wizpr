@@ -210,7 +210,13 @@ class TranscriptionManager(
         }
         running = wav
         setStatus(wav, TranscriptionStatus.Running)
-        transcriber.transcribe(wav, languageTag) { result ->
+        val config = aiSettings.config.value
+        transcriber.transcribe(
+            wav = wav,
+            languageTag = languageTag,
+            online = config.onlineRecognition,
+            biasing = noteStore.triggers.value + config.vocabularyList,
+        ) { result ->
             running = null
             when (result) {
                 is Transcriber.Result.Success -> {

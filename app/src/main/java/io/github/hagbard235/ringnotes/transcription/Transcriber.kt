@@ -13,10 +13,12 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.annotation.RequiresApi
+import io.github.hagbard235.ringnotes.core.RecognitionAudio
 import io.github.hagbard235.ringnotes.core.WizprBle
 import java.io.File
-import java.io.FileInputStream
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * Transcribes a recorded WAV file with the phone's on-device speech recognizer
@@ -37,28 +39,73 @@ class Transcriber(private val context: Context) {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
-    fun transcribe(wav: File, languageTag: String, onDone: (Result) -> Unit) {
+    /**
+     * @param online use Google's (usually more accurate) online recognizer; audio then
+     *   leaves the device. Falls back to the on-device recognizer if that fails.
+     * @param biasing words the recognizer should expect (trigger phrases, device names).
+     */
+    fun transcribe(
+        wav: File,
+        languageTag: String,
+        online: Boolean = false,
+        biasing: List<String> = emptyList(),
+        onDone: (Result) -> Unit,
+    ) {
         if (!isSupported()) {
             onDone(Result.Failure("On-Device-Spracherkennung braucht Android 13+ mit Google-Spracherkennung"))
             return
         }
-        start(wav, languageTag, onDone)
+        val pcm = try {
+            RecognitionAudio.prepare(readPcm(wav))
+        } catch (e: IOException) {
+            onDone(Result.Failure("Aufnahme nicht lesbar: ${e.message}"))
+            return
+        }
+        if (online && SpeechRecognizer.isRecognitionAvailable(context)) {
+            start(pcm, languageTag, online = true, biasing) { result ->
+                if (result is Result.Failure) {
+                    Log.i(TAG, "Online recognition failed (${result.message}), falling back to on-device")
+                    start(pcm, languageTag, online = false, biasing, onDone)
+                } else {
+                    onDone(result)
+                }
+            }
+        } else {
+            start(pcm, languageTag, online = false, biasing, onDone)
+        }
+    }
+
+    /** The 16-bit mono PCM samples after the 44-byte WAV header. */
+    private fun readPcm(wav: File): ShortArray {
+        val bytes = wav.readBytes()
+        if (bytes.size <= WAV_HEADER_BYTES) return ShortArray(0)
+        val buffer = ByteBuffer.wrap(bytes, WAV_HEADER_BYTES.toInt(), bytes.size - WAV_HEADER_BYTES.toInt())
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .asShortBuffer()
+        return ShortArray(buffer.remaining()).also { buffer.get(it) }
     }
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    private fun start(wav: File, languageTag: String, onDone: (Result) -> Unit) {
+    private fun start(pcm: ShortArray, languageTag: String, online: Boolean, biasing: List<String>, onDone: (Result) -> Unit) {
         val (readSide, writeSide) = ParcelFileDescriptor.createPipe()
-        val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        val recognizer = if (online) {
+            SpeechRecognizer.createSpeechRecognizer(context)
+        } else {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
-            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, !online)
             .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, readSide)
             .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
             .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
             .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, WizprBle.SAMPLE_RATE_HZ)
             // Keep recognizing across pauses until the audio source ends.
             .putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
+        if (biasing.isNotEmpty()) {
+            intent.putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(biasing.distinct().take(MAX_BIASING)))
+        }
 
         val segments = mutableListOf<String>()
         var finished = false
@@ -112,7 +159,7 @@ class Transcriber(private val context: Context) {
         })
 
         // Safety net in case the recognizer never reports back: audio length plus a minute.
-        val audioMs = (wav.length() - WAV_HEADER_BYTES).coerceAtLeast(0) / 2 * 1000 / WizprBle.SAMPLE_RATE_HZ
+        val audioMs = pcm.size.toLong() * 1000 / WizprBle.SAMPLE_RATE_HZ
         timeout = Runnable {
             finish(if (segments.isEmpty()) Result.Failure("Spracherkennung hat nicht geantwortet") else Result.Success(text()))
         }.also { handler.postDelayed(it, audioMs + 60_000) }
@@ -124,18 +171,17 @@ class Transcriber(private val context: Context) {
             finish(Result.Failure("Spracherkennung konnte nicht starten: ${e.message}"))
             return
         }
-        pumpPcm(wav, writeSide)
+        pumpPcm(pcm, writeSide)
     }
 
-    /** Copies the WAV payload (after the 44-byte header) into the pipe on a background thread. */
-    private fun pumpPcm(wav: File, writeSide: ParcelFileDescriptor) {
+    /** Writes the prepared PCM (little-endian 16 bit) into the pipe on a background thread. */
+    private fun pumpPcm(pcm: ShortArray, writeSide: ParcelFileDescriptor) {
         Thread({
             try {
                 ParcelFileDescriptor.AutoCloseOutputStream(writeSide).use { out ->
-                    FileInputStream(wav).use { input ->
-                        input.skip(WAV_HEADER_BYTES)
-                        input.copyTo(out, bufferSize = 8 * 1024)
-                    }
+                    val bytes = ByteBuffer.allocate(pcm.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+                    bytes.asShortBuffer().put(pcm)
+                    out.write(bytes.array())
                 }
             } catch (e: IOException) {
                 // The recognizer closed its end early (finished or failed); nothing left to do.
@@ -167,5 +213,6 @@ class Transcriber(private val context: Context) {
     private companion object {
         const val TAG = "Transcriber"
         const val WAV_HEADER_BYTES = 44L
+        const val MAX_BIASING = 100
     }
 }

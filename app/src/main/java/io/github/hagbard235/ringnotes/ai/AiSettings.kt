@@ -22,7 +22,14 @@ data class AiConfig(
     val statusTone: Boolean = true,
     /** Only recordings created after this moment are forwarded automatically. */
     val enabledSince: Long = 0,
+    /** Use Google's online recognizer (more accurate, audio leaves the device). */
+    val onlineRecognition: Boolean = false,
+    /** Extra words the recognizer should expect, comma separated (device names, places …). */
+    val vocabulary: String = "",
 ) {
+    val vocabularyList: List<String>
+        get() = vocabulary.split(',', '\n', ';').map { it.trim() }.filter { it.isNotEmpty() }
+
     val isReady: Boolean
         get() = when (target) {
             AiTarget.OFF -> false
@@ -69,6 +76,8 @@ class AiSettings(context: Context) {
             .putBoolean("speakReplies", new.speakReplies)
             .putBoolean("statusTone", new.statusTone)
             .putLong("enabledSince", new.enabledSince)
+            .putBoolean("onlineRecognition", new.onlineRecognition)
+            .putString("vocabulary", new.vocabulary)
             .apply()
         _config.value = new
     }
@@ -84,5 +93,7 @@ class AiSettings(context: Context) {
         speakReplies = prefs.getBoolean("speakReplies", true),
         statusTone = prefs.getBoolean("statusTone", true),
         enabledSince = prefs.getLong("enabledSince", 0),
+        onlineRecognition = prefs.getBoolean("onlineRecognition", false),
+        vocabulary = prefs.getString("vocabulary", "") ?: "",
     )
 }

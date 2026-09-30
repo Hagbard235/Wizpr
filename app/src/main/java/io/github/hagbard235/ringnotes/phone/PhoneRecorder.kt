@@ -32,6 +32,11 @@ class PhoneRecorder(
 ) {
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var running = false
+    @Volatile private var discard = false
+
+    /** The WAV currently being written, if any. */
+    @Volatile var currentFile: File? = null
+        private set
 
     private val _active = MutableStateFlow(false)
     val active: StateFlow<Boolean> = _active.asStateFlow()
@@ -78,6 +83,8 @@ class PhoneRecorder(
             return false
         }
         running = true
+        discard = false
+        currentFile = file
         _active.value = true
         Thread({
             val buffer = ShortArray(rate / 10)
@@ -106,10 +113,17 @@ class PhoneRecorder(
         running = false
     }
 
+    /** Stop and throw the recording away (e.g. it was only a short volume-down press). */
+    fun cancel() {
+        discard = true
+        running = false
+    }
+
     private fun finish(file: File, durationMs: Long, peak: Int) {
         _active.value = false
+        currentFile = null
         when {
-            durationMs < MIN_DURATION_MS -> file.delete()
+            discard || durationMs < MIN_DURATION_MS -> file.delete()
             peak < SILENCE_PEAK -> {
                 file.delete()
                 onSilent()

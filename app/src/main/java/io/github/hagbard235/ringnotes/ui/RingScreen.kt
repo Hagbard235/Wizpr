@@ -74,6 +74,7 @@ class RingScreenActions(
     val onPlay: (Recording) -> Unit,
     val onShare: (Recording) -> Unit,
     val onDelete: (Recording) -> Unit,
+    val onDeleteAll: () -> Unit,
     val onTranscribe: (Recording) -> Unit,
     val onSendToAi: (Recording) -> Unit,
     val onUpdateAi: ((AiConfig) -> AiConfig) -> Unit,
@@ -254,6 +255,7 @@ private fun RecordingsTab(
     actions: RingScreenActions,
 ) {
     var toDelete by remember { mutableStateOf<Recording?>(null) }
+    var confirmDeleteAll by remember { mutableStateOf(false) }
     if (recordings.isEmpty()) {
         Text(
             "Noch keine Aufnahmen. Starte eine Aufnahme am Ring – sie wird hier automatisch als WAV gespeichert.",
@@ -261,7 +263,36 @@ private fun RecordingsTab(
         )
         return
     }
+    if (confirmDeleteAll) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteAll = false },
+            title = { Text("Alle ${recordings.size} Aufnahmen löschen?") },
+            text = {
+                Text(
+                    "Audio, Transkripte und KI-/Smarthome-Antworten werden gelöscht. " +
+                        "Gespeicherte Notizen bleiben erhalten. Das lässt sich nicht rückgängig machen.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    actions.onDeleteAll()
+                    confirmDeleteAll = false
+                }) { Text("Alle löschen", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDeleteAll = false }) { Text("Abbrechen") } },
+        )
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = { confirmDeleteAll = true }) {
+                    Text("Alle Aufnahmen löschen", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
         items(recordings, key = { it.file.path }) { rec ->
             Column {
                 Row(

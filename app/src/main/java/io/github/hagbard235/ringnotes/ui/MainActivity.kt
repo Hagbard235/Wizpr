@@ -163,6 +163,10 @@ class MainActivity : ComponentActivity() {
                             if (playing == rec.file) player.stop()
                             controller.delete(rec)
                         },
+                        onDeleteAll = {
+                            player.stop()
+                            controller.deleteAll(keep = setOfNotNull(phoneRecorder.currentFile))
+                        },
                     ),
                 )
             }
