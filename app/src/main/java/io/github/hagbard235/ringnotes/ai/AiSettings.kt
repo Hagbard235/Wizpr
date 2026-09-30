@@ -16,12 +16,13 @@ enum class SpeechMode(val label: String) {
 
     /**
      * @param question the service waits for an answer
+     * @param information an answer to a status question (e.g. a temperature): a tone alone says nothing
      * @param problem failed, rejected, partial or otherwise not fully done
      */
-    fun speaks(question: Boolean, problem: Boolean): Boolean = when (this) {
+    fun speaks(question: Boolean, information: Boolean, problem: Boolean): Boolean = when (this) {
         ALWAYS -> true
-        QUESTIONS_AND_PROBLEMS -> question || problem
-        QUESTIONS -> question
+        QUESTIONS_AND_PROBLEMS -> question || information || problem
+        QUESTIONS -> question || information
         OFF -> false
     }
 }

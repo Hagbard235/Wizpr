@@ -172,8 +172,10 @@ fun AiSettingsTab(
         Text(
             when (config.speechMode) {
                 SpeechMode.ALWAYS -> "Jede Antwort wird vorgelesen, auch „Notiz gespeichert“."
-                SpeechMode.QUESTIONS_AND_PROBLEMS -> "Erledigtes nur per Ton; Rückfragen und Fehler werden vorgelesen."
-                SpeechMode.QUESTIONS -> "Erledigtes und Fehler nur per Ton; nur Rückfragen werden vorgelesen."
+                SpeechMode.QUESTIONS_AND_PROBLEMS ->
+                    "Geschaltetes nur per Ton; Rückfragen, Auskünfte (z. B. Temperatur) und Fehler werden vorgelesen."
+                SpeechMode.QUESTIONS ->
+                    "Geschaltetes und Fehler nur per Ton; Rückfragen und Auskünfte (z. B. Temperatur) werden vorgelesen."
                 SpeechMode.OFF -> "Nichts wird vorgelesen; Rückmeldung nur per Ton und Benachrichtigung."
             },
             style = MaterialTheme.typography.bodySmall,

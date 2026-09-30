@@ -17,6 +17,7 @@ import io.github.hagbard235.ringnotes.core.symcon.SymconAction
 import io.github.hagbard235.ringnotes.core.symcon.SymconProtocol
 import io.github.hagbard235.ringnotes.core.symcon.SymconRequest
 import io.github.hagbard235.ringnotes.core.symcon.SymconResponse
+import io.github.hagbard235.ringnotes.core.symcon.SpokenReply
 import io.github.hagbard235.ringnotes.core.symcon.SymconResponse.Companion.Parsed
 import io.github.hagbard235.ringnotes.core.symcon.matchOption
 import io.github.hagbard235.ringnotes.feedback.Feedback
@@ -336,8 +337,9 @@ class SymconJobs(
         }
         val question = r.status == SymconProtocol.CLARIFICATION_REQUIRED
         val problem = r.status != SymconProtocol.COMPLETED && !question
-        if (config.speechMode.speaks(question, problem)) {
-            feedback.speak(r.message, Locale.getDefault().toLanguageTag(), config.speechRate)
+        if (config.speechMode.speaks(question, SpokenReply.isInformation(r), problem)) {
+            // Speech waits for the tone to finish (see Feedback).
+            feedback.speak(SpokenReply.text(r), Locale.getDefault().toLanguageTag(), config.speechRate)
         }
         notify(job, r)
     }
