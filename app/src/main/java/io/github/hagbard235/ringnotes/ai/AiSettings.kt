@@ -7,6 +7,25 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class AiTarget { OFF, CLAUDE, WEBHOOK, SYMCON }
 
+/** Which replies are read aloud; everything else is signalled by the status tone only. */
+enum class SpeechMode(val label: String) {
+    ALWAYS("Immer"),
+    QUESTIONS_AND_PROBLEMS("Rückfragen und Probleme"),
+    QUESTIONS("Nur Rückfragen"),
+    OFF("Nie");
+
+    /**
+     * @param question the service waits for an answer
+     * @param problem failed, rejected, partial or otherwise not fully done
+     */
+    fun speaks(question: Boolean, problem: Boolean): Boolean = when (this) {
+        ALWAYS -> true
+        QUESTIONS_AND_PROBLEMS -> question || problem
+        QUESTIONS -> question
+        OFF -> false
+    }
+}
+
 data class AiConfig(
     val target: AiTarget = AiTarget.OFF,
     val claudeApiKey: String = "",
@@ -16,8 +35,10 @@ data class AiConfig(
     /** IP-Symcon AI hook (contract v1): HTTPS URL and bearer access key. */
     val symconUrl: String = "",
     val symconKey: String = "",
-    /** Read replies aloud on the phone. */
-    val speakReplies: Boolean = true,
+    /** Which replies are read aloud on the phone. */
+    val speechMode: SpeechMode = SpeechMode.ALWAYS,
+    /** Speaking rate, 1.0 = the engine's normal speed. */
+    val speechRate: Float = DEFAULT_SPEECH_RATE,
     /** Play a short tone for success, question or error. */
     val statusTone: Boolean = true,
     /** Only recordings created after this moment are forwarded automatically. */
@@ -43,6 +64,7 @@ data class AiConfig(
 
     companion object {
         const val DEFAULT_MODEL = "claude-opus-5"
+        const val DEFAULT_SPEECH_RATE = 1.3f
         const val DEFAULT_INSTRUCTION =
             "Das folgende ist eine gesprochene Notiz, aufgenommen mit einem Smart Ring und automatisch " +
                 "transkribiert (Erkennungsfehler sind möglich). Fasse sie knapp zusammen und liste " +
@@ -73,7 +95,8 @@ class AiSettings(context: Context) {
             .putString("webhookUrl", new.webhookUrl)
             .putString("symconUrl", new.symconUrl)
             .putString("symconKey", new.symconKey)
-            .putBoolean("speakReplies", new.speakReplies)
+            .putString("speechMode", new.speechMode.name)
+            .putFloat("speechRate", new.speechRate)
             .putBoolean("statusTone", new.statusTone)
             .putLong("enabledSince", new.enabledSince)
             .putBoolean("onlineRecognition", new.onlineRecognition)
@@ -90,7 +113,10 @@ class AiSettings(context: Context) {
         webhookUrl = prefs.getString("webhookUrl", "") ?: "",
         symconUrl = prefs.getString("symconUrl", "") ?: "",
         symconKey = prefs.getString("symconKey", "") ?: "",
-        speakReplies = prefs.getBoolean("speakReplies", true),
+        speechMode = prefs.getString("speechMode", null)?.let { runCatching { SpeechMode.valueOf(it) }.getOrNull() }
+            // Older versions stored a plain on/off switch.
+            ?: if (prefs.getBoolean("speakReplies", true)) SpeechMode.ALWAYS else SpeechMode.OFF,
+        speechRate = prefs.getFloat("speechRate", AiConfig.DEFAULT_SPEECH_RATE),
         statusTone = prefs.getBoolean("statusTone", true),
         enabledSince = prefs.getLong("enabledSince", 0),
         onlineRecognition = prefs.getBoolean("onlineRecognition", false),

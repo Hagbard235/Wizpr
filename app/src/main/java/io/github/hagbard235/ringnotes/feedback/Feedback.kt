@@ -22,7 +22,7 @@ class Feedback(private val context: Context) {
     private val main = Handler(Looper.getMainLooper())
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-    private val pending = mutableListOf<Pair<String, String?>>()
+    private val pending = mutableListOf<Triple<String, String?, Float>>()
 
     fun tone(tone: Tone) {
         main.post {
@@ -37,14 +37,14 @@ class Feedback(private val context: Context) {
     }
 
     /** Speak [text] once; the engine starts lazily on first use. */
-    fun speak(text: String, languageTag: String?) {
+    fun speak(text: String, languageTag: String?, rate: Float = 1f) {
         if (text.isBlank()) return
         main.post {
             if (ttsReady) {
-                say(text, languageTag)
+                say(text, languageTag, rate)
                 return@post
             }
-            pending += text to languageTag
+            pending += Triple(text, languageTag, rate)
             if (tts == null) {
                 tts = TextToSpeech(context.applicationContext) { status ->
                     main.post {
@@ -56,7 +56,7 @@ class Feedback(private val context: Context) {
                                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                                     .build(),
                             )
-                            pending.forEach { (t, l) -> say(t, l) }
+                            pending.forEach { (t, l, r) -> say(t, l, r) }
                         } else {
                             Log.w(TAG, "TextToSpeech unavailable ($status)")
                         }
@@ -67,9 +67,10 @@ class Feedback(private val context: Context) {
         }
     }
 
-    private fun say(text: String, languageTag: String?) {
+    private fun say(text: String, languageTag: String?, rate: Float) {
         val engine = tts ?: return
         engine.setLanguage(languageTag?.let(Locale::forLanguageTag) ?: Locale.getDefault())
+        engine.setSpeechRate(rate.coerceIn(0.5f, 2.5f))
         engine.speak(text, TextToSpeech.QUEUE_ADD, null, "reply-${text.hashCode()}")
     }
 

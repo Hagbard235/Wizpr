@@ -26,6 +26,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.hagbard235.ringnotes.ai.AiConfig
 import io.github.hagbard235.ringnotes.ai.AiTarget
+import io.github.hagbard235.ringnotes.ai.SpeechMode
+import androidx.compose.material3.Slider
 
 @Composable
 fun AiSettingsTab(
@@ -163,8 +165,27 @@ fun AiSettingsTab(
         )
 
         Text("Rückmeldung am Handy", style = MaterialTheme.typography.titleMedium)
-        SwitchRow("Antworten vorlesen (Smarthome, „Notiz gespeichert“)", config.speakReplies) { on ->
-            onUpdate { it.copy(speakReplies = on) }
+        Text("Vorlesen", style = MaterialTheme.typography.bodyMedium)
+        SpeechMode.entries.forEach { mode ->
+            TargetOption(mode.label, config.speechMode == mode) { onUpdate { it.copy(speechMode = mode) } }
+        }
+        Text(
+            when (config.speechMode) {
+                SpeechMode.ALWAYS -> "Jede Antwort wird vorgelesen, auch „Notiz gespeichert“."
+                SpeechMode.QUESTIONS_AND_PROBLEMS -> "Erledigtes nur per Ton; Rückfragen und Fehler werden vorgelesen."
+                SpeechMode.QUESTIONS -> "Erledigtes und Fehler nur per Ton; nur Rückfragen werden vorgelesen."
+                SpeechMode.OFF -> "Nichts wird vorgelesen; Rückmeldung nur per Ton und Benachrichtigung."
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (config.speechMode != SpeechMode.OFF) {
+            Text("Sprechtempo: ${"%.1f".format(config.speechRate)}×", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = config.speechRate,
+                onValueChange = { v -> onUpdate { it.copy(speechRate = v) } },
+                valueRange = 0.8f..2.0f,
+                steps = 11,
+            )
         }
         SwitchRow("Status-Ton (Erfolg, Rückfrage, Fehler)", config.statusTone) { on ->
             onUpdate { it.copy(statusTone = on) }

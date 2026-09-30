@@ -334,7 +334,11 @@ class SymconJobs(
                 },
             )
         }
-        if (config.speakReplies) feedback.speak(r.message, Locale.getDefault().toLanguageTag())
+        val question = r.status == SymconProtocol.CLARIFICATION_REQUIRED
+        val problem = r.status != SymconProtocol.COMPLETED && !question
+        if (config.speechMode.speaks(question, problem)) {
+            feedback.speak(r.message, Locale.getDefault().toLanguageTag(), config.speechRate)
+        }
         notify(job, r)
     }
 

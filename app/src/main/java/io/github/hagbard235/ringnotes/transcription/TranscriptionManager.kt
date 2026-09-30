@@ -16,6 +16,7 @@ import io.github.hagbard235.ringnotes.R
 import io.github.hagbard235.ringnotes.ai.AiForwarder
 import io.github.hagbard235.ringnotes.ai.AiSettings
 import io.github.hagbard235.ringnotes.ai.AiTarget
+import io.github.hagbard235.ringnotes.ai.SpeechMode
 import io.github.hagbard235.ringnotes.feedback.Feedback
 import io.github.hagbard235.ringnotes.notes.Note
 import io.github.hagbard235.ringnotes.notes.NoteStore
@@ -118,7 +119,8 @@ class TranscriptionManager(
         val note = noteStore.add(body, rec.name)
         val config = aiSettings.config.value
         if (config.statusTone) feedback.tone(Feedback.Tone.SUCCESS)
-        if (config.speakReplies) feedback.speak("Notiz gespeichert", languageTag)
+        // A saved note is a success: only spoken when every reply is read aloud.
+        if (config.speechMode == SpeechMode.ALWAYS) feedback.speak("Notiz gespeichert", languageTag, config.speechRate)
         notifyNote(note)
         return true
     }
