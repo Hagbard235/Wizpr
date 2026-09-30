@@ -178,7 +178,7 @@ class MainActivity : ComponentActivity() {
                         onSymconAnswer = { rec: Recording, optionId: String?, text: String ->
                             symconJobs.answer(rec.file.path, optionId, text)
                         },
-                        onSubmitText = { text: String -> transcriptions.submitText(text) },
+                        onSubmitText = { text: String, dryRun: Boolean -> transcriptions.submitText(text, dryRun) },
                         onTalkStart = {
                             if (phoneRecorder.hasPermission()) pushToTalk.pressStart() else withMicPermission {}
                         },

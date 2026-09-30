@@ -97,14 +97,14 @@ class TranscriptionManager(
      * recognition. Goes through the same forwarding (including answers to open
      * smart-home questions) and shows up as a "test-…" entry in the recordings.
      */
-    fun submitText(text: String) {
+    fun submitText(text: String, dryRun: Boolean = false) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         main.post {
             val rec = store.createTextEntry(trimmed)
             _lastTestEntry.value = rec.file.path
             onRecordingsChanged()
-            if (!keepAsNote(rec, trimmed)) forward(rec, trimmed)
+            if (!keepAsNote(rec, trimmed)) forward(rec, trimmed, dryRun)
         }
     }
 
@@ -248,14 +248,14 @@ class TranscriptionManager(
         return true
     }
 
-    private fun forward(rec: Recording, transcript: String) {
+    private fun forward(rec: Recording, transcript: String, dryRun: Boolean = false) {
         val config = aiSettings.config.value
         if (!config.isReady) {
             setAiStatus(rec.file, TranscriptionStatus.Failed("KI-Weiterleitung ist nicht eingerichtet"))
             return
         }
         if (config.target == AiTarget.SYMCON) {
-            symconJobs.submit(rec, transcript)
+            symconJobs.submit(rec, transcript, dryRun)
             return
         }
         if (_aiStatus.value[rec.file.path] == TranscriptionStatus.Running) return

@@ -55,6 +55,8 @@ data class SymconRequest(
     val durationMs: Long? = null,
     val locale: String? = null,
     val replyTo: ReplyTo? = null,
+    /** Recognition test only: the service resolves the request but switches nothing. */
+    val dryRun: Boolean = false,
 ) {
     init {
         require(transcript.isNotBlank()) { "transcript must not be empty" }
@@ -80,6 +82,7 @@ data class SymconRequest(
             r.optionId?.let { reply.put("optionId", it) }
             json.put("replyTo", reply)
         }
+        if (dryRun) json.put("dryRun", true)
         return json.toString()
     }
 }
@@ -91,6 +94,11 @@ data class SymconAction(
     val operation: String?,
     /** pending, confirmed, failed or unknown; `unknown` must never trigger a new switching request. */
     val status: String,
+    /** Timed switch-on: planned duration, planned switch-off time (RFC 3339) and its state. */
+    val durationSeconds: Long? = null,
+    val offAt: String? = null,
+    /** "scheduled" = planned, not confirmed; the later result is not pushed to the app. */
+    val offStatus: String? = null,
 )
 
 data class SymconError(val code: String, val retryable: Boolean)
@@ -157,20 +165,28 @@ data class SymconResponse(
 
         private const val DEFAULT_POLL_MS = 1_500L
 
-        private fun parseAction(a: JSONObject) = SymconAction(
-            deviceId = a.stringOrNull("deviceId"),
-            deviceName = a.stringOrNull("deviceName"),
-            service = a.stringOrNull("service"),
-            operation = a.stringOrNull("operation"),
-            status = a.optString("status", "unknown"),
-        )
+        private fun parseAction(a: JSONObject): SymconAction {
+            val p = a.optJSONObject("parameters")
+            return SymconAction(
+                deviceId = a.stringOrNull("deviceId"),
+                deviceName = a.stringOrNull("deviceName"),
+                service = a.stringOrNull("service"),
+                operation = a.stringOrNull("operation"),
+                status = a.optString("status", "unknown"),
+                durationSeconds = p?.takeIf { it.has("durationSeconds") && !it.isNull("durationSeconds") }
+                    ?.optLong("durationSeconds"),
+                offAt = p?.stringOrNull("offAt"),
+                offStatus = p?.stringOrNull("offStatus"),
+            )
+        }
 
         private fun parseClarification(c: JSONObject) = Clarification(
             id = c.optString("id", ""),
             expiresAt = c.stringOrNull("expiresAt"),
             options = c.optJSONArray("options").objects().mapNotNull { o ->
                 val id = o.stringOrNull("id") ?: return@mapNotNull null
-                ClarificationOption(id, o.optString("label", id))
+                // An empty label would become an empty answer transcript, which the contract forbids.
+                ClarificationOption(id, o.stringOrNull("label")?.takeIf { it.isNotBlank() } ?: id)
             },
             allowFreeText = c.optBoolean("allowFreeText", false),
         )

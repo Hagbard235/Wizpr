@@ -1,6 +1,9 @@
 package io.github.hagbard235.ringnotes.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -82,7 +85,8 @@ class RingScreenActions(
     /** optionId is null for a free-text answer. */
     val onSymconAnswer: (Recording, String?, String) -> Unit,
     /** Debug: send typed text instead of a recognized recording. */
-    val onSubmitText: (String) -> Unit,
+    /** Second argument: dryRun (recognition test, the smart home switches nothing). */
+    val onSubmitText: (String, Boolean) -> Unit,
     val onTalkStart: () -> Unit,
     val onTalkEnd: () -> Unit,
     val onVolumeKeyEnabled: (Boolean) -> Unit,
@@ -402,6 +406,7 @@ private fun TestInputPanel(
     actions: RingScreenActions,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
+    var dryRun by rememberSaveable { mutableStateOf(true) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Testeingabe (statt Spracherkennung)", style = MaterialTheme.typography.titleSmall)
@@ -415,12 +420,21 @@ private fun TestInputPanel(
                 Button(
                     enabled = config.isReady && text.isNotBlank(),
                     onClick = {
-                        actions.onSubmitText(text)
+                        actions.onSubmitText(text, dryRun && config.target == AiTarget.SYMCON)
                         text = ""
                     },
                 ) { Text("Senden") }
                 if (!config.isReady) {
                     Text("Ziel erst unten einrichten", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (config.target == AiTarget.SYMCON) {
+                Row(
+                    Modifier.fillMaxWidth().toggleable(value = dryRun, onValueChange = { dryRun = it }, role = Role.Switch),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Nur Erkennung testen (dryRun) – schaltet nichts", modifier = Modifier.weight(1f))
+                    Switch(checked = dryRun, onCheckedChange = null)
                 }
             }
             Text(

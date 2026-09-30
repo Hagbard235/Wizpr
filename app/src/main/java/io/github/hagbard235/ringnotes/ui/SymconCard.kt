@@ -26,7 +26,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.github.hagbard235.ringnotes.core.symcon.SymconAction
 import io.github.hagbard235.ringnotes.core.symcon.SymconProtocol
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import io.github.hagbard235.ringnotes.symcon.SymconJobs
 import io.github.hagbard235.ringnotes.symcon.SymconView
 
@@ -48,8 +52,8 @@ fun SymconCard(view: SymconView, onRefresh: () -> Unit, onAnswer: (optionId: Str
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (view.busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                val label = if (view.followUpOpen) "Rückfrage" else SymconJobs.statusLabel(view.status)
-                Text("Smarthome · $label", style = MaterialTheme.typography.labelLarge)
+                val test = if (view.dryRun) " · Test (schaltet nichts)" else ""
+                Text("Smarthome · ${SymconJobs.statusLabel(view.status)}$test", style = MaterialTheme.typography.labelLarge)
             }
             // Earlier turns of the conversation, so an answer is readable in context.
             view.thread.forEach { turn ->
@@ -70,6 +74,7 @@ fun SymconCard(view: SymconView, onRefresh: () -> Unit, onAnswer: (optionId: Str
                     "• ${a.deviceName ?: a.deviceId ?: "Gerät"}: ${a.operation ?: a.service ?: ""} – ${actionStatus(a.status)}",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                scheduledOff(a)?.let { Text("   $it", style = MaterialTheme.typography.bodySmall) }
             }
             view.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
 
@@ -80,16 +85,6 @@ fun SymconCard(view: SymconView, onRefresh: () -> Unit, onAnswer: (optionId: Str
                 }
                 if (c.allowFreeText) {
                     Text("Oder einfach am Ring antworten.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            if (view.followUpOpen) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "↩ Antworte am Ring (2 Min.) – der Zusammenhang wird mitgeschickt.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { freeText = "" }) { Text("Tippen") }
                 }
             }
             if (view.canRefresh) TextButton(onClick = onRefresh) { Text("Aktualisieren") }
@@ -112,6 +107,21 @@ fun SymconCard(view: SymconView, onRefresh: () -> Unit, onAnswer: (optionId: Str
             },
             dismissButton = { TextButton(onClick = { freeText = null }) { Text("Abbrechen") } },
         )
+    }
+}
+
+/**
+ * A timed switch-on: the switch-off is only planned. The app never learns whether it
+ * happened, so it must not claim the device is off.
+ */
+private fun scheduledOff(a: SymconAction): String? {
+    val at = a.offAt?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+    if (at == null && a.durationSeconds == null) return null
+    val time = at?.atZoneSameInstant(ZoneId.systemDefault())?.format(DateTimeFormatter.ofPattern("HH:mm:ss"))
+    val state = if (a.offStatus == "scheduled") "geplant, nicht bestätigt" else a.offStatus ?: "geplant"
+    return when {
+        time != null -> "Ausschalten um $time ($state)"
+        else -> "Ausschalten nach ${a.durationSeconds} s ($state)"
     }
 }
 

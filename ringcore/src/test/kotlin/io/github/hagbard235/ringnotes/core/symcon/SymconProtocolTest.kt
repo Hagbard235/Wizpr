@@ -116,6 +116,33 @@ class SymconProtocolTest {
     }
 
     @Test
+    fun parsesScheduledSwitchOff() {
+        val body = """{"version":"1","requestId":"x","status":"completed",
+            "message":"Der Sternenhimmel ist an. Er wird in 30 Sekunden ausgeschaltet.",
+            "actions":[{"deviceId":"sternenhimmel","deviceName":"Sternenhimmel","service":"light","operation":"setPower",
+              "parameters":{"on":true,"durationSeconds":30,"offAt":"2026-09-30T12:00:30Z","offStatus":"scheduled"},
+              "status":"confirmed"}],"error":null,"clarification":null,"poll":null}"""
+        val a = assertIs<Parsed.Ok>(SymconResponse.parse(body)).response.actions.single()
+        assertEquals(30L, a.durationSeconds)
+        assertEquals("2026-09-30T12:00:30Z", a.offAt)
+        assertEquals("scheduled", a.offStatus)
+    }
+
+    @Test
+    fun emptyOptionLabelFallsBackToId() {
+        val body = """{"version":"1","requestId":"x","status":"clarification_required","message":"Welches?","actions":[],
+            "clarification":{"id":"c","options":[{"id":"wandlampe-links","label":""}],"allowFreeText":true}}"""
+        val c = assertIs<Parsed.Ok>(SymconResponse.parse(body)).response.clarification!!
+        assertEquals("wandlampe-links", c.options.single().label)
+    }
+
+    @Test
+    fun dryRunIsSentOnlyWhenSet() {
+        assertTrue(JSONObject(SymconRequest("a", "Licht an", dryRun = true).toJson()).getBoolean("dryRun"))
+        assertFalse(JSONObject(SymconRequest("b", "Licht an").toJson()).has("dryRun"))
+    }
+
+    @Test
     fun matchesSpokenAnswerToOption() {
         val options = listOf(ClarificationOption("sternenhimmel", "Sternenhimmel"), ClarificationOption("treppenhaus", "Treppenhaus"))
         assertEquals("sternenhimmel", matchOption("Den Sternenhimmel bitte", options)?.id)
