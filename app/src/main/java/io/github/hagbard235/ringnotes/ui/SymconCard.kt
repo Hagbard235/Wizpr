@@ -48,7 +48,18 @@ fun SymconCard(view: SymconView, onRefresh: () -> Unit, onAnswer: (optionId: Str
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (view.busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                Text("Smarthome · ${SymconJobs.statusLabel(view.status)}", style = MaterialTheme.typography.labelLarge)
+                val label = if (view.followUpOpen) "Rückfrage" else SymconJobs.statusLabel(view.status)
+                Text("Smarthome · $label", style = MaterialTheme.typography.labelLarge)
+            }
+            // Earlier turns of the conversation, so an answer is readable in context.
+            view.thread.forEach { turn ->
+                Text("Du: ${turn.request}", style = MaterialTheme.typography.bodySmall)
+                if (turn.reply.isNotBlank()) {
+                    Text("Smarthome: ${turn.reply}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (view.thread.isNotEmpty() && view.transcript.isNotBlank()) {
+                Text("Du: ${view.transcript}", style = MaterialTheme.typography.bodySmall)
             }
             // Shown verbatim as plain text, as the contract requires.
             view.message?.takeIf { it.isNotBlank() }?.let {
@@ -69,6 +80,16 @@ fun SymconCard(view: SymconView, onRefresh: () -> Unit, onAnswer: (optionId: Str
                 }
                 if (c.allowFreeText) {
                     Text("Oder einfach am Ring antworten.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (view.followUpOpen) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "↩ Antworte am Ring (2 Min.) – der Zusammenhang wird mitgeschickt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { freeText = "" }) { Text("Tippen") }
                 }
             }
             if (view.canRefresh) TextButton(onClick = onRefresh) { Text("Aktualisieren") }

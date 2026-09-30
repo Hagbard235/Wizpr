@@ -48,7 +48,17 @@ data class SymconView(
     val note: String?,
     val busy: Boolean,
     val canRefresh: Boolean,
+    /** The smart home waits for an answer; the next recording is sent as that answer. */
+    val awaitingAnswer: Boolean = false,
+    /** A question asked in plain text (no options); answer by voice or free text. */
+    val followUpOpen: Boolean = false,
+    /** Earlier turns of this conversation, oldest first. */
+    val thread: List<ThreadEntry> = emptyList(),
+    /** What was sent in this turn. */
+    val transcript: String = "",
 )
+
+data class ThreadEntry(val request: String, val reply: String)
 
 /**
  * Runs requests against the IP-Symcon AI hook (contract version 1): send with a
@@ -74,12 +84,18 @@ class SymconJobs(
         var note: String? = null,
         var spokenKey: String? = null,
         var answered: Boolean = false,
+        /** requestId of the previous request in the same conversation (answer to a question). */
+        val linkedTo: String? = null,
+        /** When the final (non-pending) answer arrived; starts the follow-up window. */
+        var respondedAt: Long = 0,
     ) {
         // Runtime only, not persisted.
         var busy = false
         var attempts = 0
         val response: SymconResponse?
             get() = (SymconResponse.parse(rawResponse) as? Parsed.Ok)?.response
+        val transcript: String
+            get() = runCatching { JSONObject(body).optString("transcript") }.getOrDefault("")
     }
 
     private val executor = Executors.newSingleThreadScheduledExecutor { Thread(it, "symcon") }
@@ -113,34 +129,65 @@ class SymconJobs(
                     startJob(
                         recording.file.path,
                         request(recording, transcript, ReplyTo(job.requestId, clarification.id, option?.id)),
+                        linkedTo = job.requestId,
                     )
                     return@execute
                 }
                 Log.i(TAG, "Answer matches no option; sending as a new request")
             }
+            val followUp = openFollowUp()
+            if (followUp != null) {
+                followUp.answered = true
+                save(followUp.wavPath)
+                startJob(recording.file.path, request(recording, followUpText(followUp, transcript), null), followUp.requestId)
+                return@execute
+            }
             startJob(recording.file.path, request(recording, transcript, null))
         }
     }
 
-    /** Answer an open question by tapping an option (in the app or the notification). */
+    /**
+     * Answer an open question by tapping an option or typing (in the app or the
+     * notification). Works for formal clarifications and for questions the smart
+     * home only asked in its message.
+     */
     fun answer(wavPath: String, optionId: String?, text: String) {
         executor.execute {
             val job = jobs[wavPath]?.lastOrNull() ?: return@execute
-            val clarification = openClarificationOf(job) ?: run {
-                job.note = "Rückfrage ist nicht mehr offen"
-                publish()
-                return@execute
+            val clarification = openClarificationOf(job)
+            val locale = Locale.getDefault().toLanguageTag()
+            val reply = when {
+                clarification != null -> SymconRequest(
+                    requestId = UUID.randomUUID().toString(),
+                    transcript = text,
+                    locale = locale,
+                    replyTo = ReplyTo(job.requestId, clarification.id, optionId),
+                )
+                isFollowUpOpen(job) -> SymconRequest(
+                    requestId = UUID.randomUUID().toString(),
+                    transcript = followUpText(job, text),
+                    locale = locale,
+                )
+                else -> {
+                    job.note = "Rückfrage ist nicht mehr offen"
+                    publish()
+                    return@execute
+                }
             }
             job.answered = true
             save(wavPath)
-            val reply = SymconRequest(
-                requestId = UUID.randomUUID().toString(),
-                transcript = text,
-                locale = Locale.getDefault().toLanguageTag(),
-                replyTo = ReplyTo(job.requestId, clarification.id, optionId),
-            )
-            startJob(wavPath, reply)
+            startJob(wavPath, reply, linkedTo = job.requestId)
         }
+    }
+
+    /**
+     * The contract only links answers to formal clarifications. When the smart home
+     * asks back in plain text, the answer is sent as a new request that carries the
+     * context in words, so the AI on the other side still knows what it is about.
+     */
+    private fun followUpText(job: Job, answer: String): String {
+        val question = job.response?.message?.trim().orEmpty()
+        return "Antwort auf deine Rückfrage „$question“ zu meiner Anfrage „${job.transcript}“: $answer"
     }
 
     /** Ask again for the latest request of a recording; never creates a new switching request. */
@@ -172,8 +219,8 @@ class SymconJobs(
         replyTo = replyTo,
     )
 
-    private fun startJob(wavPath: String, request: SymconRequest) {
-        val job = Job(wavPath, request.requestId, request.toJson(), System.currentTimeMillis())
+    private fun startJob(wavPath: String, request: SymconRequest, linkedTo: String? = null) {
+        val job = Job(wavPath, request.requestId, request.toJson(), System.currentTimeMillis(), linkedTo = linkedTo)
         jobs.getOrPut(wavPath) { mutableListOf() } += job
         save(wavPath)
         send(job)
@@ -282,9 +329,12 @@ class SymconJobs(
         }
         job.busy = false
         job.pollUrl = null
+        if (job.respondedAt == 0L) job.respondedAt = System.currentTimeMillis()
         save(job.wavPath)
         publish()
         announce(job, r, config)
+        // Refresh once the follow-up window closes, so the "answer on the ring" hint disappears.
+        if (isFollowUpOpen(job)) executor.schedule(Runnable { publish() }, FOLLOW_UP_WINDOW_MS + 500, TimeUnit.MILLISECONDS)
     }
 
     /** Tone, speech and notification — once per distinct result, even across repeated polls. */
@@ -295,7 +345,10 @@ class SymconJobs(
         save(job.wavPath)
         if (config.statusTone) {
             feedback.tone(
-                when (r.status) {
+                when {
+                    isFollowUpOpen(job) -> Feedback.Tone.QUESTION
+                    else -> null
+                } ?: when (r.status) {
                     SymconProtocol.COMPLETED -> Feedback.Tone.SUCCESS
                     SymconProtocol.CLARIFICATION_REQUIRED -> Feedback.Tone.QUESTION
                     SymconProtocol.PARTIAL -> Feedback.Tone.WARNING
@@ -357,10 +410,45 @@ class SymconJobs(
         return if (expires != null && expires < System.currentTimeMillis()) null else c
     }
 
+    /** The latest answered request asked back in plain text (no formal clarification). */
+    private fun openFollowUp(): Job? =
+        jobs.values.mapNotNull { it.lastOrNull() }
+            .maxByOrNull { it.submittedAt }
+            ?.takeIf(::isFollowUpOpen)
+
+    /**
+     * A final answer ending in a question mark, without a clarification object,
+     * answered at most [FOLLOW_UP_WINDOW_MS] ago and not yet replied to: the next
+     * recording is treated as the answer.
+     */
+    private fun isFollowUpOpen(job: Job): Boolean {
+        val r = job.response ?: return false
+        if (job.answered || r.status == SymconProtocol.PENDING || r.clarification != null) return false
+        if (!r.message.trim().endsWith("?")) return false
+        return job.respondedAt > 0 && System.currentTimeMillis() - job.respondedAt <= FOLLOW_UP_WINDOW_MS
+    }
+
+    /** The conversation up to [job]: earlier requests it answers, oldest first. */
+    private fun threadOf(job: Job): List<ThreadEntry> {
+        val byId = jobs.values.flatten().associateBy { it.requestId }
+        val chain = mutableListOf<Job>()
+        var current: Job? = byId[job.linkedTo]
+        while (current != null && chain.size < MAX_THREAD) {
+            chain += current
+            current = byId[current.linkedTo]
+        }
+        return chain.reversed().map { ThreadEntry(displayTranscript(it), it.response?.message.orEmpty()) }
+    }
+
+    /** Hide the context wrapper of follow-up answers in the UI. */
+    private fun displayTranscript(job: Job): String =
+        job.transcript.substringAfter("“: ", job.transcript).takeIf { job.linkedTo != null } ?: job.transcript
+
     private fun publish() {
         _views.value = jobs.mapValues { (_, list) ->
             val job = list.last()
             val r = job.response
+            val followUp = isFollowUpOpen(job)
             SymconView(
                 status = r?.status,
                 message = r?.message,
@@ -370,6 +458,10 @@ class SymconJobs(
                 busy = job.busy,
                 canRefresh = !job.busy &&
                     (r == null || r.status == SymconProtocol.PENDING || job.note != null || r.error?.retryable == true),
+                awaitingAnswer = followUp || openClarificationOf(job) != null,
+                followUpOpen = followUp,
+                thread = threadOf(job),
+                transcript = displayTranscript(job),
             )
         }
     }
@@ -394,6 +486,8 @@ class SymconJobs(
                         note = o.optString("note").ifEmpty { null },
                         spokenKey = o.optString("spokenKey").ifEmpty { null },
                         answered = o.optBoolean("answered", false),
+                        linkedTo = o.optString("linkedTo").ifEmpty { null } ?: replyToOf(o.getString("body")),
+                        respondedAt = o.optLong("respondedAt", 0),
                     )
                 }.toMutableList()
             } catch (e: Exception) {
@@ -421,11 +515,17 @@ class SymconJobs(
                     .put("rawResponse", job.rawResponse ?: "")
                     .put("note", job.note ?: "")
                     .put("spokenKey", job.spokenKey ?: "")
-                    .put("answered", job.answered),
+                    .put("answered", job.answered)
+                    .put("linkedTo", job.linkedTo ?: "")
+                    .put("respondedAt", job.respondedAt),
             )
         }
         File(recordingsDir, wav.nameWithoutExtension + SUFFIX).writeText(array.toString())
     }
+
+    /** Older saved jobs have no linkedTo; recover it from the request's replyTo. */
+    private fun replyToOf(body: String): String? =
+        runCatching { JSONObject(body).optJSONObject("replyTo")?.optString("requestId") }.getOrNull()?.ifEmpty { null }
 
     private fun iso(ms: Long): String =
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
@@ -440,6 +540,9 @@ class SymconJobs(
         private const val MIN_POLL_MS = 500L
         private const val MAX_RETRY_DELAY_MS = 60_000L
         private val BACKOFF_MS = listOf(2_000L, 5_000L, 10_000L)
+        /** How long a plain-text question from the smart home waits for an answer on the ring. */
+        const val FOLLOW_UP_WINDOW_MS = 2 * 60_000L
+        private const val MAX_THREAD = 10
 
         fun statusLabel(status: String?): String = when (status) {
             SymconProtocol.COMPLETED -> "Erledigt"
