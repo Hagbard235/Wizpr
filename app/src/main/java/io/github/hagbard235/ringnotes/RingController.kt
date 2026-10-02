@@ -82,6 +82,10 @@ class RingController(private val context: Context) : RingGattClient.Listener {
     private val clickTimeout = Runnable { dispatcher.onClickTimeout()?.let(::handleEvent) }
     // End-of-recording detection (see checkRecordingEnd).
     private var lastAudioAt = 0L
+    /** Last time a packet carried sound above the silence threshold. */
+    private var lastLoudAt = 0L
+    /** Loudest packet so far in this recording (raw PCM), to set the silence threshold. */
+    private var speechPeak = 0
     private var stopSignalAt = 0L
     private var stopReason = ""
     private var packetsAfterStop = 0
@@ -281,6 +285,8 @@ class RingController(private val context: Context) : RingGattClient.Listener {
         recordingStartedAt = System.currentTimeMillis()
         peak = 0
         lastAudioAt = SystemClock.elapsedRealtime()
+        lastLoudAt = lastAudioAt
+        speechPeak = 0
         stopSignalAt = 0L
         packetsAfterStop = 0
         handler.removeCallbacks(endWatch)
@@ -304,8 +310,13 @@ class RingController(private val context: Context) : RingGattClient.Listener {
             finishRecording()
             return
         }
-        for (s in pcm) peak = maxOf(peak, abs(s.toInt()))
+        var packetPeak = 0
+        for (s in pcm) packetPeak = maxOf(packetPeak, abs(s.toInt()))
+        peak = maxOf(peak, packetPeak)
+        speechPeak = maxOf(speechPeak, packetPeak)
         val now = SystemClock.elapsedRealtime()
+        // Relative to the loudest speech so far, so a noisy room does not count as talking.
+        if (packetPeak >= maxOf(SILENCE_FLOOR, speechPeak / SILENCE_RATIO)) lastLoudAt = now
         if (now - lastLevelUpdate >= LEVEL_UPDATE_MS) {
             lastLevelUpdate = now
             val level = (peak * WAV_GAIN / Short.MAX_VALUE).coerceAtMost(1f)
@@ -330,17 +341,29 @@ class RingController(private val context: Context) : RingGattClient.Listener {
      *  - a stop signal (transfer stop or mic off) arrived and no audio came for
      *    [QUIET_AFTER_STOP_MS] (or [MAX_DRAIN_MS] passed since the signal), or
      *  - no audio arrived for [IDLE_TIMEOUT_MS] even without a stop signal.
+     * Packets alone are not reliable either: the ring may keep streaming
+     * silence after the mic went off. So the level counts too:
+     *  - after a stop signal, [SILENT_AFTER_STOP_MS] without sound ends it,
+     *  - without one, [SILENCE_TIMEOUT_MS] of silence ends it,
+     *  - and nothing runs longer than [MAX_RECORDING_MS].
      */
     private fun checkRecordingEnd() {
-        if (writer == null) return
+        val w = writer ?: return
         val now = SystemClock.elapsedRealtime()
         val quietFor = now - lastAudioAt
-        when {
-            stopSignalAt != 0L && (quietFor >= QUIET_AFTER_STOP_MS || now - stopSignalAt >= MAX_DRAIN_MS) ->
-                finishRecording("$stopReason, $packetsAfterStop Pakete danach")
-            stopSignalAt == 0L && quietFor >= IDLE_TIMEOUT_MS -> finishRecording("kein Stoppsignal, Audio verstummt")
-            else -> handler.postDelayed(endWatch, END_CHECK_MS)
+        val silentFor = now - lastLoudAt
+        val stopped = stopSignalAt != 0L
+        val reason = when {
+            stopped && quietFor >= QUIET_AFTER_STOP_MS -> "$stopReason, $packetsAfterStop Pakete danach"
+            stopped && now - maxOf(stopSignalAt, lastLoudAt) >= SILENT_AFTER_STOP_MS ->
+                "$stopReason, danach nur Stille ($packetsAfterStop Pakete)"
+            stopped && now - stopSignalAt >= MAX_DRAIN_MS -> "$stopReason, Ton lief weiter ($packetsAfterStop Pakete)"
+            !stopped && quietFor >= IDLE_TIMEOUT_MS -> "kein Stoppsignal, Audio verstummt"
+            !stopped && silentFor >= SILENCE_TIMEOUT_MS -> "kein Stoppsignal, ${silentFor / 1000} s Stille"
+            w.durationMs >= MAX_RECORDING_MS -> "Höchstdauer ${MAX_RECORDING_MS / 1000} s erreicht"
+            else -> null
         }
+        if (reason != null) finishRecording(reason) else handler.postDelayed(endWatch, END_CHECK_MS)
     }
 
     private fun finishRecording(reason: String? = null) {
@@ -394,6 +417,13 @@ class RingController(private val context: Context) : RingGattClient.Listener {
         const val QUIET_AFTER_STOP_MS = 700L
         const val MAX_DRAIN_MS = 5_000L
         const val IDLE_TIMEOUT_MS = 3_000L
+        const val SILENT_AFTER_STOP_MS = 800L
+        const val SILENCE_TIMEOUT_MS = 5_000L
+        const val MAX_RECORDING_MS = 120_000L
+        /** Raw PCM peak below which a packet always counts as silence. */
+        const val SILENCE_FLOOR = 300
+        /** A packet this many times quieter than the loudest speech counts as silence. */
+        const val SILENCE_RATIO = 8
         const val RECONNECT_DELAY_MS = 1_000L
         const val BATTERY_POLL_MS = 5 * 60_000L
         const val LEVEL_UPDATE_MS = 100L
